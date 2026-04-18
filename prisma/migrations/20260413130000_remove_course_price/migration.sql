@@ -1,2 +1,2 @@
 -- AlterTable
-ALTER TABLE `course` DROP COLUMN `price`;
+ALTER TABLE `Course` DROP COLUMN `price`;

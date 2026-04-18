@@ -1,5 +1,5 @@
 -- AlterTable
-ALTER TABLE `user` ADD COLUMN `isInSupport` BOOLEAN NOT NULL DEFAULT false,
+ALTER TABLE `User` ADD COLUMN `isInSupport` BOOLEAN NOT NULL DEFAULT false,
     ADD COLUMN `supportStatus` ENUM('waiting', 'active', 'closed') NOT NULL DEFAULT 'closed';
 
 -- CreateTable

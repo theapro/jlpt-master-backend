@@ -1,8 +1,8 @@
 -- AlterTable
-ALTER TABLE `course` ADD COLUMN `duration` INTEGER NULL;
+ALTER TABLE `Course` ADD COLUMN `duration` INTEGER NULL;
 
 -- CreateTable
-CREATE TABLE `message` (
+CREATE TABLE `Message` (
     `id` INTEGER NOT NULL AUTO_INCREMENT,
     `telegramId` VARCHAR(64) NOT NULL,
     `sender` ENUM('user', 'admin') NOT NULL,
@@ -18,4 +18,4 @@ CREATE TABLE `message` (
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- AddForeignKey
-ALTER TABLE `message` ADD CONSTRAINT `message_telegramId_fkey` FOREIGN KEY (`telegramId`) REFERENCES `user`(`telegramId`) ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE `Message` ADD CONSTRAINT `message_telegramId_fkey` FOREIGN KEY (`telegramId`) REFERENCES `User`(`telegramId`) ON DELETE CASCADE ON UPDATE CASCADE;
