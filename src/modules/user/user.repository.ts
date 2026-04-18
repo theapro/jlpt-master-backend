@@ -148,6 +148,9 @@ export const userRepository = {
       telegramNickname?: string | null;
       supportAdminId?: number | null;
 
+      isInSupport?: boolean;
+      supportStatus?: "none" | "pending" | "active" | "closed";
+
       pendingCourseId?: number | null;
 
       currentStep?: string;

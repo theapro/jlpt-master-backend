@@ -605,16 +605,11 @@ const resetFlow = async (user: BotUser): Promise<BotResponse> => {
     goal: null,
     learningFormat: null,
     pendingCourseId: null,
-  });
 
-  try {
-    await userRepository.updateSupportStatusByTelegramId(
-      user.telegramId,
-      "none",
-    );
-  } catch {
-    // ignore
-  }
+    isInSupport: false,
+    supportStatus: "none",
+    supportAdminId: null,
+  });
 
   try {
     await supportRepository.closeAllOpenByTelegramId(user.telegramId);
@@ -681,9 +676,10 @@ const enterSupport = async (
   const request =
     existing ?? (await supportRepository.createRequest(telegramId));
 
-  await userRepository.updateSupportStatusByTelegramId(telegramId, "pending");
   await userRepository.updateByTelegramId(telegramId, {
     currentStep: BotState.SUPPORT,
+    isInSupport: true,
+    supportStatus: "pending",
   });
 
   try {
@@ -699,7 +695,7 @@ const enterSupport = async (
   const phoneLine = user.phone ? `\n📞 Phone: ${user.phone}` : "";
   const requestLine = request ? `\n🧾 Request: ${request.id}` : "";
 
-  await notifyAdmin(
+  void notifyAdmin(
     `🎧 Operator so‘rovi:\n\n` +
       `👤 Ism: ${user.name}\n` +
       `🆔 ID: ${user.telegramId}` +
@@ -1167,11 +1163,9 @@ const handleSupport = async (
       `\n\n${text}`,
   );
 
-  try {
-    await userRepository.updateSupportStatusByTelegramId(telegramId, "active");
-  } catch {
-    // ignore
-  }
+  void userRepository
+    .updateSupportStatusByTelegramId(telegramId, "active")
+    .catch(() => {});
 
   return {
     reply: await botTextService.get("SUPPORT_SENT"),
@@ -1202,16 +1196,11 @@ export const botService = {
         goal: null,
         learningFormat: null,
         pendingCourseId: null,
-      });
 
-      try {
-        await userRepository.updateSupportStatusByTelegramId(
-          telegramId,
-          "none",
-        );
-      } catch {
-        // ignore
-      }
+        isInSupport: false,
+        supportStatus: "none",
+        supportAdminId: null,
+      });
 
       try {
         await supportRepository.closeAllOpenByTelegramId(telegramId);

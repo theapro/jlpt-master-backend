@@ -1,12 +1,13 @@
 import { Router } from "express";
 
 import { getTelegramBot, TELEGRAM_WEBHOOK_PATH } from "./bot";
+import { perfMetrics } from "../shared/perf-metrics";
 
 const router = Router();
 
-let cachedWebhookCallback:
-  | ReturnType<ReturnType<typeof getTelegramBot>["webhookCallback"]>
-  | null = null;
+let cachedWebhookCallback: ReturnType<
+  ReturnType<typeof getTelegramBot>["webhookCallback"]
+> | null = null;
 
 const getWebhookCallback = () => {
   if (!cachedWebhookCallback) {
@@ -17,6 +18,10 @@ const getWebhookCallback = () => {
 };
 
 router.post(TELEGRAM_WEBHOOK_PATH, (req, res, next) => {
+  const end = perfMetrics.span("telegram.webhook.total");
+  res.once("finish", end);
+  res.once("close", end);
+
   try {
     return getWebhookCallback()(req, res, next);
   } catch (err) {
