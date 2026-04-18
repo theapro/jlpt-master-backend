@@ -104,11 +104,28 @@ model Admin {
   role      AdminRole @default(admin)
   createdAt DateTime  @default(now())
 
+  passwordResetTokens AdminPasswordResetToken[]
+
   supportUsers User[] @relation("SupportAdminUsers")
 
   hiddenMessages MessageHidden[]
 
   @@index([role])
+  @@index([createdAt])
+}
+
+model AdminPasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  adminId   Int
+  tokenHash String   @unique @db.VarChar(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([expiresAt])
   @@index([createdAt])
 }
 

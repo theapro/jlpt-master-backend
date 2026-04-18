@@ -1,5 +1,8 @@
 import bcrypt from "bcrypt";
 import { AdminRole, MessageSender } from "@prisma/client";
+import axios from "axios";
+import { createHash, randomBytes } from "crypto";
+import { OAuth2Client } from "google-auth-library";
 
 import {
   AppError,
@@ -15,6 +18,130 @@ import { prisma } from "../../shared/prisma";
 import { adminRepository } from "./admin.repository";
 
 const invalidCreds = () => new AppError(401, "Invalid email or password");
+
+const getAdminPanelUrl = () => {
+  const raw =
+    process.env.ADMIN_PANEL_URL ??
+    process.env.ADMIN_PANEL_BASE_URL ??
+    process.env.FRONTEND_URL ??
+    "";
+
+  if (!raw || raw.trim().length === 0) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("ADMIN_PANEL_URL is not set");
+    }
+    return "http://localhost:3001";
+  }
+
+  return raw.replace(/\/+$/, "");
+};
+
+const getResendApiKey = () => {
+  const key = process.env.RESEND_API_KEY;
+  if (!key || key.trim().length === 0) {
+    throw new Error("RESEND_API_KEY is not set");
+  }
+  return key;
+};
+
+const getResendFromEmail = () => {
+  const from =
+    process.env.RESEND_FROM_EMAIL ??
+    process.env.EMAIL_FROM ??
+    process.env.MAIL_FROM ??
+    "";
+
+  if (from && from.trim().length > 0) return from.trim();
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("RESEND_FROM_EMAIL is not set");
+  }
+
+  // Works for development/testing in Resend, but should be overridden in prod.
+  return "onboarding@resend.dev";
+};
+
+const sendEmailViaResend = async (params: {
+  to: string;
+  subject: string;
+  html: string;
+  text?: string;
+}) => {
+  const apiKey = getResendApiKey();
+  const from = getResendFromEmail();
+
+  try {
+    await axios.post(
+      "https://api.resend.com/emails",
+      {
+        from,
+        to: params.to,
+        subject: params.subject,
+        html: params.html,
+        text: params.text,
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        timeout: 15_000,
+      },
+    );
+  } catch (err) {
+    console.error("[ERROR SOURCE]: email.resend");
+    console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+    throw new AppError(502, "Failed to send email");
+  }
+};
+
+const generateResetToken = () => {
+  const b64 = randomBytes(32).toString("base64");
+  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+};
+
+const hashResetToken = (token: string) =>
+  createHash("sha256").update(token).digest("hex");
+
+let googleClient: OAuth2Client | null = null;
+
+const getGoogleClientId = () => {
+  const id = process.env.GOOGLE_CLIENT_ID;
+  if (!id || id.trim().length === 0)
+    throw new Error("GOOGLE_CLIENT_ID is not set");
+  return id;
+};
+
+const verifyGoogleIdTokenEmail = async (credential: string) => {
+  const clientId = getGoogleClientId();
+  if (!googleClient) googleClient = new OAuth2Client(clientId);
+
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: clientId,
+    });
+
+    const payload = ticket.getPayload();
+    const email = payload?.email;
+    const emailVerified = payload?.email_verified;
+
+    if (typeof email !== "string" || email.trim().length === 0) {
+      throw new AppError(401, "Invalid Google credential");
+    }
+
+    if (emailVerified !== true) {
+      throw new AppError(401, "Google email is not verified");
+    }
+
+    return email.trim().toLowerCase();
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    console.error("[ERROR SOURCE]: admin.googleLogin.verifyIdToken");
+    console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+    throw new AppError(401, "Invalid Google credential");
+  }
+};
 
 const adminRoles = new Set<string>(Object.values(AdminRole));
 
@@ -257,6 +384,129 @@ export const adminService = {
         role: admin.role,
       },
     };
+  },
+
+  requestPasswordReset: async (emailRaw: unknown) => {
+    const email = parseAdminEmail(emailRaw);
+
+    const admin = await prisma.admin.findUnique({
+      where: { email },
+      select: { id: true, email: true, name: true },
+    });
+
+    // Avoid account enumeration.
+    if (!admin) return { ok: true };
+
+    const token = generateResetToken();
+    const tokenHash = hashResetToken(token);
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
+
+    await prisma.adminPasswordResetToken.deleteMany({
+      where: { adminId: admin.id },
+    });
+
+    const created = await prisma.adminPasswordResetToken.create({
+      data: {
+        adminId: admin.id,
+        tokenHash,
+        expiresAt,
+      },
+      select: { id: true },
+    });
+
+    const resetUrl = `${getAdminPanelUrl()}/reset-password?token=${encodeURIComponent(token)}`;
+    const subject = "Reset your JLPT Master admin password";
+    const text = `Hello ${admin.name},\n\nWe received a request to reset your admin password.\n\nReset link (valid for 60 minutes):\n${resetUrl}\n\nIf you didn't request this, you can ignore this email.`;
+    const html = `
+      <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; line-height: 1.5;">
+        <p>Hello ${admin.name},</p>
+        <p>We received a request to reset your admin password.</p>
+        <p><a href="${resetUrl}">Click here to reset your password</a> (valid for 60 minutes).</p>
+        <p>If you didn't request this, you can safely ignore this email.</p>
+      </div>
+    `;
+
+    try {
+      await sendEmailViaResend({
+        to: admin.email,
+        subject,
+        html,
+        text,
+      });
+    } catch (err) {
+      try {
+        await prisma.adminPasswordResetToken.delete({
+          where: { id: created.id },
+        });
+      } catch {
+        // ignore cleanup errors
+      }
+      throw err;
+    }
+
+    return { ok: true };
+  },
+
+  confirmPasswordReset: async (tokenRaw: unknown, newPasswordRaw: unknown) => {
+    if (!isNonEmptyString(tokenRaw))
+      throw new AppError(400, "reset token is required");
+
+    const token = normalizeString(String(tokenRaw));
+    if (token.length > 500) throw new AppError(400, "reset token is too long");
+
+    const newPassword = parseAdminPassword(newPasswordRaw);
+    const tokenHash = hashResetToken(token);
+
+    const record = await prisma.adminPasswordResetToken.findUnique({
+      where: { tokenHash },
+      select: {
+        id: true,
+        adminId: true,
+        expiresAt: true,
+        usedAt: true,
+        admin: { select: { id: true, role: true } },
+      },
+    });
+
+    const now = new Date();
+    if (!record || record.usedAt !== null || record.expiresAt <= now) {
+      throw new AppError(400, "Invalid or expired reset token");
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+
+    await prisma.$transaction([
+      prisma.admin.update({
+        where: { id: record.adminId },
+        data: { password: passwordHash },
+      }),
+      prisma.adminPasswordResetToken.update({
+        where: { id: record.id },
+        data: { usedAt: now },
+      }),
+      prisma.adminPasswordResetToken.deleteMany({
+        where: { adminId: record.adminId, id: { not: record.id } },
+      }),
+    ]);
+
+    return { ok: true };
+  },
+
+  googleLogin: async (credentialRaw: unknown) => {
+    if (!isNonEmptyString(credentialRaw))
+      throw new AppError(400, "credential is required");
+
+    const credential = normalizeString(String(credentialRaw));
+    if (credential.length > 10_000)
+      throw new AppError(400, "credential is too long");
+
+    const email = await verifyGoogleIdTokenEmail(credential);
+
+    const admin = await adminRepository.findByEmail(email);
+    if (!admin) throw new AppError(401, "Unauthorized");
+
+    const token = signAdminToken({ adminId: admin.id, role: admin.role });
+    return { token, admin };
   },
 
   listAdmins: async () => {

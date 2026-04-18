@@ -28,6 +28,7 @@
     "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "express": "^5.1.0",
+    "google-auth-library": "^10.3.0",
     "jsonwebtoken": "^9.0.2",
     "prisma": "^6.7.0",
     "telegraf": "^4.16.3",

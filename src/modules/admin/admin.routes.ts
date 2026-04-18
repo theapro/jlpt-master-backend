@@ -11,6 +11,11 @@ const router = Router();
 
 router.post("/login", adminController.login);
 
+router.post("/password-reset/request", adminController.requestPasswordReset);
+router.post("/password-reset/confirm", adminController.confirmPasswordReset);
+
+router.post("/google/login", adminController.googleLogin);
+
 router.post(
   "/reply",
   requireAdminAuth,

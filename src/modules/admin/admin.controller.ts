@@ -13,6 +13,24 @@ export const adminController = {
     res.status(200).json(result);
   }) as RequestHandler,
 
+  requestPasswordReset: asyncHandler(async (req, res) => {
+    const result = await adminService.requestPasswordReset(req.body?.email);
+    res.status(200).json(result);
+  }) as RequestHandler,
+
+  confirmPasswordReset: asyncHandler(async (req, res) => {
+    const result = await adminService.confirmPasswordReset(
+      req.body?.token,
+      req.body?.newPassword,
+    );
+    res.status(200).json(result);
+  }) as RequestHandler,
+
+  googleLogin: asyncHandler(async (req, res) => {
+    const result = await adminService.googleLogin(req.body?.credential);
+    res.status(200).json(result);
+  }) as RequestHandler,
+
   dashboard: asyncHandler(async (req, res) => {
     const result = await adminService.getDashboard();
     res.status(200).json(result);
