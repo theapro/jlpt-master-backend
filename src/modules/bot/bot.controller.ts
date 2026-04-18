@@ -3,6 +3,13 @@ import type { RequestHandler } from "express";
 import { botTextService } from "./bot-text.service";
 import { botService } from "./bot.service";
 
+const isBotTrafficLoggingEnabled = (() => {
+  const raw = String(process.env.BOT_DEBUG ?? "").toLowerCase().trim();
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  if (raw === "0" || raw === "false" || raw === "no") return false;
+  return process.env.NODE_ENV !== "production";
+})();
+
 const logError = (err: unknown, source: string) => {
   console.error("[ERROR SOURCE]:", source);
   console.error(err instanceof Error ? (err.stack ?? err.message) : err);
@@ -18,15 +25,17 @@ const toErrorResponse = async (_err: unknown, _source: string) => {
 
 const wrap = (fn: (req: any) => Promise<any>): RequestHandler => {
   return async (req, res) => {
-    console.log("[BOT REQUEST]:", {
-      method: req.method,
-      path: req.originalUrl ?? req.url,
-      body: req.body,
-    });
+    if (isBotTrafficLoggingEnabled) {
+      console.log("[BOT REQUEST]:", {
+        method: req.method,
+        path: req.originalUrl ?? req.url,
+        body: req.body,
+      });
+    }
 
     try {
       const result = await fn(req);
-      console.log("[BOT RESPONSE]:", result);
+      if (isBotTrafficLoggingEnabled) console.log("[BOT RESPONSE]:", result);
       res.status(200).json(result);
     } catch (err) {
       logError(err, "bot.controller");

@@ -5,6 +5,13 @@ import { enrollmentRepository } from "./enrollment.repository";
 
 const isDebug = process.env.NODE_ENV !== "production";
 
+const isBotTrafficLoggingEnabled = (() => {
+  const raw = String(process.env.BOT_DEBUG ?? "").toLowerCase().trim();
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  if (raw === "0" || raw === "false" || raw === "no") return false;
+  return isDebug;
+})();
+
 const statuses = new Set<string>(Object.values(EnrollmentStatus));
 
 const parseStatus = (value: unknown) => {
@@ -18,14 +25,16 @@ const parseStatus = (value: unknown) => {
 
 export const enrollmentService = {
   assign: async (body: any) => {
-    console.log("[BOT REQUEST]:", {
-      layer: "enrollment.service",
-      action: "assign",
-      userId: body?.userId,
-      courseId: body?.courseId,
-      status: body?.status,
-      ...(isDebug ? { body } : {}),
-    });
+    if (isBotTrafficLoggingEnabled) {
+      console.log("[BOT REQUEST]:", {
+        layer: "enrollment.service",
+        action: "assign",
+        userId: body?.userId,
+        courseId: body?.courseId,
+        status: body?.status,
+        ...(isDebug ? { body } : {}),
+      });
+    }
 
     const userId = parsePositiveInt(body?.userId);
     const courseId = parsePositiveInt(body?.courseId);
@@ -42,12 +51,14 @@ export const enrollmentService = {
         courseId,
         status,
       });
-      console.log("[BOT RESPONSE]:", {
-        layer: "enrollment.service",
-        action: "assign",
-        enrollmentId: result.id,
-        status: result.status,
-      });
+      if (isBotTrafficLoggingEnabled) {
+        console.log("[BOT RESPONSE]:", {
+          layer: "enrollment.service",
+          action: "assign",
+          enrollmentId: result.id,
+          status: result.status,
+        });
+      }
       return result;
     } catch (err) {
       console.error("[BOT ERROR]:", {
@@ -63,11 +74,13 @@ export const enrollmentService = {
   },
 
   enrollForBot: async (params: { userId: number; courseId: number }) => {
-    console.log("[BOT REQUEST]:", {
-      layer: "enrollment.service",
-      action: "enrollForBot",
-      ...params,
-    });
+    if (isBotTrafficLoggingEnabled) {
+      console.log("[BOT REQUEST]:", {
+        layer: "enrollment.service",
+        action: "enrollForBot",
+        ...params,
+      });
+    }
 
     try {
       const result = await enrollmentRepository.upsertByUserAndCourse({
@@ -76,11 +89,13 @@ export const enrollmentService = {
         status: EnrollmentStatus.pending,
       });
 
-      console.log("[BOT RESPONSE]:", {
-        layer: "enrollment.service",
-        action: "enrollForBot",
-        enrollmentId: result.id,
-      });
+      if (isBotTrafficLoggingEnabled) {
+        console.log("[BOT RESPONSE]:", {
+          layer: "enrollment.service",
+          action: "enrollForBot",
+          enrollmentId: result.id,
+        });
+      }
 
       return { upserted: true as const };
     } catch (err) {
@@ -103,13 +118,15 @@ export const enrollmentService = {
     phone: string;
     format: UserLearningFormat;
   }) => {
-    console.log("[BOT REQUEST]:", {
-      layer: "enrollment.service",
-      action: "registerForBot",
-      userId: params.userId,
-      courseId: params.courseId,
-      format: params.format,
-    });
+    if (isBotTrafficLoggingEnabled) {
+      console.log("[BOT REQUEST]:", {
+        layer: "enrollment.service",
+        action: "registerForBot",
+        userId: params.userId,
+        courseId: params.courseId,
+        format: params.format,
+      });
+    }
 
     try {
       const result = await enrollmentRepository.upsertByUserAndCourse({
@@ -121,11 +138,13 @@ export const enrollmentService = {
         format: params.format,
       });
 
-      console.log("[BOT RESPONSE]:", {
-        layer: "enrollment.service",
-        action: "registerForBot",
-        enrollmentId: result.id,
-      });
+      if (isBotTrafficLoggingEnabled) {
+        console.log("[BOT RESPONSE]:", {
+          layer: "enrollment.service",
+          action: "registerForBot",
+          enrollmentId: result.id,
+        });
+      }
 
       return result;
     } catch (err) {
@@ -134,11 +153,13 @@ export const enrollmentService = {
         err.code === "P2002"
       ) {
         // should not happen with upsert, but keep a friendly log
-        console.log("[BOT RESPONSE]:", {
-          layer: "enrollment.service",
-          action: "registerForBot",
-          duplicate: true,
-        });
+        if (isBotTrafficLoggingEnabled) {
+          console.log("[BOT RESPONSE]:", {
+            layer: "enrollment.service",
+            action: "registerForBot",
+            duplicate: true,
+          });
+        }
       }
 
       console.error("[BOT ERROR]:", {

@@ -1,6 +1,6 @@
 import type { Context } from "telegraf";
 
-import { botApiService } from "../bot.api.service";
+import { botService } from "../../modules/bot/bot.service";
 import { replyKeyboard } from "../keyboards/main.keyboard";
 
 const getTelegramId = (ctx: Context) => {
@@ -20,14 +20,11 @@ export const startHandler = async (ctx: Context) => {
   if (!telegramId) return;
 
   try {
-    console.log("[INCOMING]:", { type: "start", telegramId });
-    const result = await botApiService.start({
+    const result = await botService.start(
       telegramId,
-      name: getDisplayName(ctx),
-      telegramUsername: ctx.from?.username ?? null,
-    });
-
-    console.log("[BACKEND RESPONSE]:", result);
+      getDisplayName(ctx),
+      ctx.from?.username ?? null,
+    );
     await ctx.reply(result.reply, replyKeyboard(result.buttons));
   } catch (err) {
     console.error("[ERROR SOURCE]: telegram.start.handler");

@@ -8,6 +8,13 @@ import { userRepository } from "./user.repository";
 
 const isDebug = process.env.NODE_ENV !== "production";
 
+const isBotTrafficLoggingEnabled = (() => {
+  const raw = String(process.env.BOT_DEBUG ?? "").toLowerCase().trim();
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  if (raw === "0" || raw === "false" || raw === "no") return false;
+  return isDebug;
+})();
+
 const supportStatuses = new Set<string>([
   "none",
   "pending",
@@ -25,12 +32,14 @@ const parseSupportStatus = (value: unknown) => {
 
 export const userService = {
   register: async (body: any) => {
-    console.log("[BOT REQUEST]:", {
-      layer: "user.service",
-      action: "register",
-      telegramId: body?.telegramId,
-      ...(isDebug ? { body } : {}),
-    });
+    if (isBotTrafficLoggingEnabled) {
+      console.log("[BOT REQUEST]:", {
+        layer: "user.service",
+        action: "register",
+        telegramId: body?.telegramId,
+        ...(isDebug ? { body } : {}),
+      });
+    }
 
     const telegramIdRaw = body?.telegramId;
     const nameRaw = body?.name;
@@ -58,12 +67,14 @@ export const userService = {
         phone,
       });
 
-      console.log("[BOT RESPONSE]:", {
-        layer: "user.service",
-        action: "register",
-        telegramId: created.telegramId,
-        id: created.id,
-      });
+      if (isBotTrafficLoggingEnabled) {
+        console.log("[BOT RESPONSE]:", {
+          layer: "user.service",
+          action: "register",
+          telegramId: created.telegramId,
+          id: created.id,
+        });
+      }
 
       return created;
     } catch (err) {
@@ -84,17 +95,19 @@ export const userService = {
     telegramNicknameRaw: unknown,
     telegramUsernameRaw: unknown,
   ) => {
-    console.log("[BOT REQUEST]:", {
-      layer: "user.service",
-      action: "getOrCreateUser",
-      telegramId: telegramIdRaw,
-      ...(isDebug
-        ? {
-            telegramNickname: telegramNicknameRaw,
-            telegramUsername: telegramUsernameRaw,
-          }
-        : {}),
-    });
+    if (isBotTrafficLoggingEnabled) {
+      console.log("[BOT REQUEST]:", {
+        layer: "user.service",
+        action: "getOrCreateUser",
+        telegramId: telegramIdRaw,
+        ...(isDebug
+          ? {
+              telegramNickname: telegramNicknameRaw,
+              telegramUsername: telegramUsernameRaw,
+            }
+          : {}),
+      });
+    }
 
     if (!isNonEmptyString(telegramIdRaw))
       throw new AppError(400, "telegramId is required");
@@ -124,12 +137,14 @@ export const userService = {
         telegramNickname,
         telegramUsername,
       });
-      console.log("[BOT RESPONSE]:", {
-        layer: "user.service",
-        action: "getOrCreateUser",
-        id: user.id,
-        telegramId: user.telegramId,
-      });
+      if (isBotTrafficLoggingEnabled) {
+        console.log("[BOT RESPONSE]:", {
+          layer: "user.service",
+          action: "getOrCreateUser",
+          id: user.id,
+          telegramId: user.telegramId,
+        });
+      }
       return user;
     } catch (err) {
       console.error("[BOT ERROR]:", {
@@ -145,11 +160,13 @@ export const userService = {
   },
 
   updatePhone: async (telegramIdRaw: unknown, phoneRaw: unknown) => {
-    console.log("[BOT REQUEST]:", {
-      layer: "user.service",
-      action: "updatePhone",
-      telegramId: telegramIdRaw,
-    });
+    if (isBotTrafficLoggingEnabled) {
+      console.log("[BOT REQUEST]:", {
+        layer: "user.service",
+        action: "updatePhone",
+        telegramId: telegramIdRaw,
+      });
+    }
 
     if (!isNonEmptyString(telegramIdRaw))
       throw new AppError(400, "telegramId is required");
@@ -172,11 +189,13 @@ export const userService = {
         phone,
       );
 
-      console.log("[BOT RESPONSE]:", {
-        layer: "user.service",
-        action: "updatePhone",
-        telegramId: updated.telegramId,
-      });
+      if (isBotTrafficLoggingEnabled) {
+        console.log("[BOT RESPONSE]:", {
+          layer: "user.service",
+          action: "updatePhone",
+          telegramId: updated.telegramId,
+        });
+      }
 
       return updated;
     } catch (err) {

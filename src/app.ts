@@ -12,6 +12,7 @@ import { goalRoutes } from "./modules/goal/goal.routes";
 import { botRoutes } from "./modules/bot/bot.routes";
 import { messageRoutes } from "./modules/message/message.routes";
 import { supportRoutes } from "./modules/support/support.routes";
+import { telegramWebhookRoutes } from "./telegram/webhook.routes";
 
 const app = express();
 
@@ -39,6 +40,8 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 
 app.use(requestLoggerMiddleware);
+
+app.use(telegramWebhookRoutes);
 
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);

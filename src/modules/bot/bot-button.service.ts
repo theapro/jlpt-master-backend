@@ -143,6 +143,46 @@ const DEFAULT_BUTTONS: Record<string, string[][]> = Object.fromEntries(
   ]),
 ) as Record<string, string[][]>;
 
+const CACHE_TTL_MS = 5 * 60 * 1000;
+const activeButtonsCache = new Map<
+  string,
+  { loadedAt: number; value: BotButton[] }
+>();
+const activeButtonsPromise = new Map<string, Promise<BotButton[]>>();
+
+const invalidateActiveButtonsCache = () => {
+  activeButtonsCache.clear();
+  activeButtonsPromise.clear();
+};
+
+const fetchActiveButtonsByState = async (state: string) => {
+  return prisma.botButton.findMany({
+    where: { state, isActive: true },
+    orderBy: [{ row: "asc" }, { col: "asc" }],
+  });
+};
+
+const getActiveButtonsByStateCached = async (state: string) => {
+  const now = Date.now();
+  const cached = activeButtonsCache.get(state) ?? null;
+  if (cached && now - cached.loadedAt < CACHE_TTL_MS) return cached.value;
+
+  const existingPromise = activeButtonsPromise.get(state) ?? null;
+  if (existingPromise) return existingPromise;
+
+  const promise = fetchActiveButtonsByState(state)
+    .then((rows) => {
+      activeButtonsCache.set(state, { loadedAt: Date.now(), value: rows });
+      return rows;
+    })
+    .finally(() => {
+      activeButtonsPromise.delete(state);
+    });
+
+  activeButtonsPromise.set(state, promise);
+  return promise;
+};
+
 const parseState = (raw: unknown) => {
   const state = typeof raw === "string" ? raw.trim() : "";
   if (!isNonEmptyString(state)) throw new AppError(400, "State is required");
@@ -245,10 +285,7 @@ const resolveDefaultActionByLabel = (state: string, label: string) => {
 export const botButtonService = {
   getButtonsByState: async (state: string): Promise<string[][]> => {
     try {
-      const buttons = await prisma.botButton.findMany({
-        where: { state, isActive: true },
-        orderBy: [{ row: "asc" }, { col: "asc" }],
-      });
+      const buttons = await getActiveButtonsByStateCached(state);
 
       if (!buttons.length) {
         return resolveDefaultButtons(state);
@@ -262,10 +299,7 @@ export const botButtonService = {
 
   getActiveForState: async (state: string): Promise<BotButton[]> => {
     try {
-      const buttons = await prisma.botButton.findMany({
-        where: { state, isActive: true },
-        orderBy: [{ row: "asc" }, { col: "asc" }],
-      });
+      const buttons = await getActiveButtonsByStateCached(state);
 
       if (buttons.length > 0) return buttons;
 
@@ -309,10 +343,7 @@ export const botButtonService = {
     label: string,
   ): Promise<string | null> => {
     try {
-      const buttons = await prisma.botButton.findMany({
-        where: { state, isActive: true },
-        orderBy: [{ row: "asc" }, { col: "asc" }],
-      });
+      const buttons = await getActiveButtonsByStateCached(state);
 
       if (!buttons.length) return resolveDefaultActionByLabel(state, label);
 
@@ -367,6 +398,8 @@ export const botButtonService = {
       }
     });
 
+    invalidateActiveButtonsCache();
+
     return prisma.botButton.findMany({
       where: { state },
       orderBy: [{ row: "asc" }, { col: "asc" }],
@@ -394,7 +427,7 @@ export const botButtonService = {
 
     const action = inferAction({ state, label, row, col });
 
-    return prisma.botButton.create({
+    const created = await prisma.botButton.create({
       data: {
         state,
         label,
@@ -404,6 +437,9 @@ export const botButtonService = {
         isActive,
       },
     });
+
+    invalidateActiveButtonsCache();
+    return created;
   },
 
   updateForAdmin: async (idRaw: unknown, body: unknown) => {
@@ -443,7 +479,7 @@ export const botButtonService = {
         ? existing.action
         : inferAction({ state: existing.state, label, row, col });
 
-    return prisma.botButton.update({
+    const updated = await prisma.botButton.update({
       where: { id },
       data: {
         label,
@@ -453,6 +489,9 @@ export const botButtonService = {
         action: nextAction,
       },
     });
+
+    invalidateActiveButtonsCache();
+    return updated;
   },
 
   deleteForAdmin: async (idRaw: unknown) => {
@@ -464,5 +503,7 @@ export const botButtonService = {
     } catch {
       // ignore if missing
     }
+
+    invalidateActiveButtonsCache();
   },
 };

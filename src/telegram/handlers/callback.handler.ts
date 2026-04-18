@@ -1,6 +1,6 @@
 import type { Context } from "telegraf";
 
-import { botApiService } from "../bot.api.service";
+import { botService } from "../../modules/bot/bot.service";
 import { replyKeyboard } from "../keyboards/main.keyboard";
 import { supportHandler } from "./support.handler";
 
@@ -21,12 +21,6 @@ export const callbackHandler = async (ctx: Context) => {
   const data = (ctx.callbackQuery as any)?.data;
   if (typeof data !== "string" || data.length === 0) return;
 
-  console.log("[INCOMING]:", {
-    type: "callback_query",
-    data,
-    from: ctx.from?.id,
-  });
-
   if (data.startsWith("admin_reply_")) {
     await safeAnswerCb(ctx, "Reply orqali javob bering");
     await ctx.reply(
@@ -41,14 +35,16 @@ export const callbackHandler = async (ctx: Context) => {
   try {
     await safeAnswerCb(ctx);
 
-    const result = await botApiService.message({ telegramId, message: data });
-    console.log("[BACKEND RESPONSE]:", result);
+    const result = await botService.message(telegramId, data);
 
     if (typeof result.reply === "string" && result.reply.trim().length > 0) {
       await ctx.reply(result.reply, replyKeyboard(result.buttons));
     }
 
-    await supportHandler.notifyAdminIfNeeded(ctx, result);
+    void supportHandler.notifyAdminIfNeeded(ctx, result).catch((err) => {
+      console.error("[ERROR SOURCE]: telegram.support.notifyAdmin");
+      console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+    });
   } catch (err) {
     console.error("[ERROR SOURCE]: telegram.callback.handler");
     console.error(err instanceof Error ? (err.stack ?? err.message) : err);

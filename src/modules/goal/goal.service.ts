@@ -5,6 +5,47 @@ import {
 } from "../../shared/utils";
 import { goalRepository } from "./goal.repository";
 
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let activeGoalsCache:
+  | Awaited<ReturnType<typeof goalRepository.findActive>>
+  | null = null;
+let activeGoalsCacheLoadedAt = 0;
+let activeGoalsRefreshPromise: Promise<
+  Awaited<ReturnType<typeof goalRepository.findActive>>
+> | null = null;
+
+const invalidateActiveGoalsCache = () => {
+  activeGoalsCache = null;
+  activeGoalsCacheLoadedAt = 0;
+  activeGoalsRefreshPromise = null;
+};
+
+const getActiveGoalsCached = async () => {
+  const now = Date.now();
+  if (
+    activeGoalsCache &&
+    activeGoalsCacheLoadedAt > 0 &&
+    now - activeGoalsCacheLoadedAt < CACHE_TTL_MS
+  ) {
+    return activeGoalsCache;
+  }
+
+  if (!activeGoalsRefreshPromise) {
+    activeGoalsRefreshPromise = goalRepository
+      .findActive()
+      .then((rows) => {
+        activeGoalsCache = rows;
+        activeGoalsCacheLoadedAt = Date.now();
+        return rows;
+      })
+      .finally(() => {
+        activeGoalsRefreshPromise = null;
+      });
+  }
+
+  return activeGoalsRefreshPromise;
+};
+
 const parseTitle = (value: unknown) => {
   if (!isNonEmptyString(value)) throw new AppError(400, "title is required");
   const title = normalizeString(value);
@@ -45,7 +86,9 @@ export const goalService = {
     const sortOrder = parseSortOrder(body?.sortOrder);
     const isActive = parseIsActive(body?.isActive);
 
-    return goalRepository.create({ title, sortOrder, isActive });
+    const created = await goalRepository.create({ title, sortOrder, isActive });
+    invalidateActiveGoalsCache();
+    return created;
   },
 
   update: async (id: number, body: any) => {
@@ -64,12 +107,14 @@ export const goalService = {
     const existing = await goalRepository.findById(id);
     if (!existing) throw new AppError(404, "Goal not found");
 
-    return goalRepository.updateById(id, patch);
+    const updated = await goalRepository.updateById(id, patch);
+    invalidateActiveGoalsCache();
+    return updated;
   },
 
   getAll: async () => goalRepository.findAll(),
 
-  getActiveForBot: async () => goalRepository.findActive(),
+  getActiveForBot: async () => getActiveGoalsCached(),
 
   getById: async (id: number) => {
     const goal = await goalRepository.findById(id);
@@ -80,6 +125,8 @@ export const goalService = {
   softDelete: async (id: number) => {
     const existing = await goalRepository.findById(id);
     if (!existing) throw new AppError(404, "Goal not found");
-    return goalRepository.updateById(id, { isActive: false });
+    const updated = await goalRepository.updateById(id, { isActive: false });
+    invalidateActiveGoalsCache();
+    return updated;
   },
 };

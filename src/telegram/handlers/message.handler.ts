@@ -1,6 +1,6 @@
 import type { Context } from "telegraf";
 
-import { botApiService } from "../bot.api.service";
+import { botService } from "../../modules/bot/bot.service";
 import { replyKeyboard } from "../keyboards/main.keyboard";
 import { supportHandler } from "./support.handler";
 
@@ -37,21 +37,16 @@ export const messageHandler = async (ctx: Context) => {
     const phone = sanitizeText(contactPhone);
 
     try {
-      console.log("[INCOMING]:", { type: "contact", telegramId, phone });
-
-      const result = await botApiService.registerPhone({
-        telegramId,
-        phone,
-        telegramMessageId,
-      });
-
-      console.log("[BACKEND RESPONSE]:", result);
+      const result = await botService.registerPhone(telegramId, phone);
 
       if (typeof result.reply === "string" && result.reply.trim().length > 0) {
         await ctx.reply(result.reply, replyKeyboard(result.buttons));
       }
 
-      await supportHandler.notifyAdminIfNeeded(ctx, result);
+      void supportHandler.notifyAdminIfNeeded(ctx, result).catch((err) => {
+        console.error("[ERROR SOURCE]: telegram.support.notifyAdmin");
+        console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+      });
     } catch (err) {
       console.error("[ERROR SOURCE]: telegram.message.handler.contact");
       console.error(err instanceof Error ? (err.stack ?? err.message) : err);
@@ -70,21 +65,16 @@ export const messageHandler = async (ctx: Context) => {
   if (text.length === 0) return;
 
   try {
-    console.log("[INCOMING]:", { type: "text", telegramId, text });
-
-    const result = await botApiService.message({
-      telegramId,
-      message: text,
-      telegramMessageId,
-    });
-
-    console.log("[BACKEND RESPONSE]:", result);
+    const result = await botService.message(telegramId, text, telegramMessageId);
 
     if (typeof result.reply === "string" && result.reply.trim().length > 0) {
       await ctx.reply(result.reply, replyKeyboard(result.buttons));
     }
 
-    await supportHandler.notifyAdminIfNeeded(ctx, result);
+    void supportHandler.notifyAdminIfNeeded(ctx, result).catch((err) => {
+      console.error("[ERROR SOURCE]: telegram.support.notifyAdmin");
+      console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+    });
   } catch (err) {
     console.error("[ERROR SOURCE]: telegram.message.handler");
     console.error(err instanceof Error ? (err.stack ?? err.message) : err);

@@ -8,6 +8,47 @@ import {
 } from "../../shared/utils";
 import { courseRepository } from "./course.repository";
 
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let activeCoursesCache:
+  | Awaited<ReturnType<typeof courseRepository.findActive>>
+  | null = null;
+let activeCoursesCacheLoadedAt = 0;
+let activeCoursesRefreshPromise: Promise<
+  Awaited<ReturnType<typeof courseRepository.findActive>>
+> | null = null;
+
+const invalidateActiveCoursesCache = () => {
+  activeCoursesCache = null;
+  activeCoursesCacheLoadedAt = 0;
+  activeCoursesRefreshPromise = null;
+};
+
+const getActiveCoursesCached = async () => {
+  const now = Date.now();
+  if (
+    activeCoursesCache &&
+    activeCoursesCacheLoadedAt > 0 &&
+    now - activeCoursesCacheLoadedAt < CACHE_TTL_MS
+  ) {
+    return activeCoursesCache;
+  }
+
+  if (!activeCoursesRefreshPromise) {
+    activeCoursesRefreshPromise = courseRepository
+      .findActive()
+      .then((rows) => {
+        activeCoursesCache = rows;
+        activeCoursesCacheLoadedAt = Date.now();
+        return rows;
+      })
+      .finally(() => {
+        activeCoursesRefreshPromise = null;
+      });
+  }
+
+  return activeCoursesRefreshPromise;
+};
+
 const parseIsActive = (value: unknown) => {
   if (value === undefined || value === null || value === "") return true;
   if (typeof value === "boolean") return value;
@@ -50,12 +91,15 @@ export const courseService = {
     }
     const isActive = parseIsActive(body?.isActive);
 
-    return courseRepository.create({
+    const created = await courseRepository.create({
       title,
       description,
       duration,
       isActive,
     });
+
+    invalidateActiveCoursesCache();
+    return created;
   },
 
   update: async (
@@ -104,12 +148,14 @@ export const courseService = {
     const isActive = parseIsActiveOptional(body?.isActive);
     if (isActive !== undefined) patch.isActive = isActive;
 
-    return courseRepository.updateById(id, patch);
+    const updated = await courseRepository.updateById(id, patch);
+    invalidateActiveCoursesCache();
+    return updated;
   },
 
   getAll: async () => courseRepository.findAll(),
 
-  getActiveForBot: async () => courseRepository.findActive(),
+  getActiveForBot: async () => getActiveCoursesCached(),
 
   getById: async (id: number) => {
     const course = await courseRepository.findById(id);
@@ -121,11 +167,13 @@ export const courseService = {
     const existing = await courseRepository.findById(id);
     if (!existing) throw new AppError(404, "Course not found");
 
-    return courseRepository.updateById(id, { isActive: false });
+    const updated = await courseRepository.updateById(id, { isActive: false });
+    invalidateActiveCoursesCache();
+    return updated;
   },
 
   getFormattedListForBot: async () => {
-    const courses = await courseRepository.findActive();
+    const courses = await getActiveCoursesCached();
     if (courses.length === 0) return "No courses are available yet.";
 
     return courses
