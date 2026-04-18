@@ -1,0 +1,227 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum AdminRole {
+  admin
+  super_admin
+}
+
+enum EnrollmentStatus {
+  pending
+  active
+  completed
+}
+
+enum SupportStatus {
+  none
+  pending
+  active
+  closed
+}
+
+enum UserExperience {
+  beginner
+  intermediate
+}
+
+enum UserLearningFormat {
+  online
+  offline
+}
+
+enum MessageSender {
+  user
+  admin
+}
+
+model User {
+  id         Int       @id @default(autoincrement())
+  telegramId String    @unique @db.VarChar(64)
+  name       String    @db.VarChar(100)
+  phone      String?   @db.VarChar(32)
+
+  telegramUsername String? @db.VarChar(64)
+  telegramNickname String? @db.VarChar(191)
+
+  pendingCourseId Int?
+
+  currentStep    String             @default("START") @db.VarChar(32)
+  goal           String?            @db.VarChar(191)
+  experience     UserExperience?
+  learningFormat UserLearningFormat?
+
+  supportAdminId Int?
+  supportAdmin   Admin? @relation("SupportAdminUsers", fields: [supportAdminId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  isInSupport   Boolean       @default(false)
+  supportStatus SupportStatus @default(none)
+  createdAt  DateTime  @default(now())
+
+  enrollments Enrollment[]
+  supportRequests SupportRequest[]
+  messages Message[]
+
+  @@index([createdAt])
+}
+
+model Goal {
+  id        Int      @id @default(autoincrement())
+  title     String   @db.VarChar(191)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+  @@index([createdAt])
+}
+
+model SupportRequest {
+  id         Int           @id @default(autoincrement())
+  telegramId String        @db.VarChar(64)
+  status     SupportStatus @default(pending)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  user User @relation(fields: [telegramId], references: [telegramId], onDelete: Cascade, onUpdate: Cascade)
+
+  @@index([telegramId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Admin {
+  id        Int       @id @default(autoincrement())
+  name      String    @db.VarChar(100)
+  email     String    @unique @db.VarChar(191)
+  password  String    @db.VarChar(255)
+  role      AdminRole @default(admin)
+  createdAt DateTime  @default(now())
+
+  supportUsers User[] @relation("SupportAdminUsers")
+
+  hiddenMessages MessageHidden[]
+
+  @@index([role])
+  @@index([createdAt])
+}
+
+model Course {
+  id          Int       @id @default(autoincrement())
+  title       String    @db.VarChar(200)
+  description String    @db.Text
+  duration    Int?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  enrollments Enrollment[]
+  registrations Registration[]
+
+  @@index([isActive])
+  @@index([createdAt])
+}
+
+model Message {
+  id         Int           @id @default(autoincrement())
+  telegramId String        @db.VarChar(64)
+  telegramMessageId Int?
+  sender     MessageSender
+  text       String        @db.Text
+  isRead     Boolean       @default(false)
+  editedAt   DateTime?
+  deletedAt  DateTime?
+  createdAt  DateTime      @default(now())
+
+  user User @relation(fields: [telegramId], references: [telegramId], onDelete: Cascade, onUpdate: Cascade)
+
+  hiddenBy MessageHidden[]
+
+  @@index([telegramId])
+  @@index([createdAt])
+  @@index([telegramId, createdAt])
+  @@index([telegramId, isRead])
+  @@index([telegramId, deletedAt])
+}
+
+model MessageHidden {
+  id        Int      @id @default(autoincrement())
+  messageId Int
+  adminId   Int
+  hiddenAt  DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  admin   Admin   @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, adminId])
+  @@index([adminId])
+  @@index([messageId])
+  @@index([hiddenAt])
+}
+
+model Enrollment {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  courseId  Int
+  status    EnrollmentStatus @default(pending)
+  name      String?          @db.VarChar(100)
+  phone     String?          @db.VarChar(32)
+  format    UserLearningFormat?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([courseId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Registration {
+  id         Int      @id @default(autoincrement())
+  telegramId String   @db.VarChar(64)
+  name       String   @db.VarChar(100)
+  phone      String   @db.VarChar(32)
+  courseId   Int
+  createdAt  DateTime @default(now())
+
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  @@unique([telegramId, courseId])
+  @@index([telegramId])
+  @@index([courseId])
+  @@index([createdAt])
+}
+
+model BotText {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BotButton {
+  id        String   @id @default(cuid())
+  state     String   @db.VarChar(32)
+  label     String   @db.VarChar(191)
+  action    String?  @db.VarChar(64)
+  row       Int
+  col       Int
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([state, row, col])
+  @@index([state, isActive, row, col])
+  @@index([createdAt])
+}

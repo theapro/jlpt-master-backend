@@ -1,0 +1,47 @@
+{
+  "name": "jlpt-master-backend",
+  "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "concurrently \"tsx watch src/server.ts\" \"tsx watch src/telegram/bot.ts\"",
+    "server:dev": "tsx watch src/server.ts",
+    "bot:dev": "tsx watch src/telegram/bot.ts",
+    "postinstall": "prisma generate",
+    "build": "npm run prisma:generate && tsc -p tsconfig.json",
+    "start": "npm run prisma:deploy && node dist/server.js",
+    "bot:start": "node dist/telegram/bot.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "seed": "prisma db seed"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.7.0",
+    "axios": "^1.7.7",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "prisma": "^6.7.0",
+    "telegraf": "^4.16.3",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.2",
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^22.15.3",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.1.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3"
+  }
+}

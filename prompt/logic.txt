@@ -1,0 +1,5 @@
+user: /start
+bot: Assalomu alaykum [username] Jlpt Master botga hush kelibsiz!
+Bu yapon tili kurslar boti siz nima maqsadd yapon tilini o'rganayotganingizni ayta olasizmi
+
+user: 
