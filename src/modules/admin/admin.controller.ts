@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 
 import { asyncHandler, AppError, parsePositiveInt } from "../../shared/utils";
+import { perfMetrics } from "../../shared/perf-metrics";
 import { adminService } from "./admin.service";
 
 export const adminController = {
@@ -53,5 +54,14 @@ export const adminController = {
     if (!req.admin) throw new AppError(401, "Unauthorized");
     const result = await adminService.getAdminById(req.admin.id);
     res.status(200).json(result);
+  }) as RequestHandler,
+
+  botMetrics: asyncHandler(async (req, res) => {
+    const report = perfMetrics.getReport({
+      windowSec: req.query?.windowSec,
+      seriesMetric:
+        (req.query as any)?.seriesMetric ?? (req.query as any)?.metric,
+    });
+    res.status(200).json(report);
   }) as RequestHandler,
 };

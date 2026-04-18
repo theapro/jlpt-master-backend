@@ -16,7 +16,9 @@ let botSingleton: Telegraf | null = null;
 export const TELEGRAM_WEBHOOK_PATH = "/telegram/webhook";
 
 const isBotDebugEnabled = () => {
-  const raw = String(process.env.BOT_DEBUG ?? "").toLowerCase().trim();
+  const raw = String(process.env.BOT_DEBUG ?? "")
+    .toLowerCase()
+    .trim();
   if (raw === "1" || raw === "true" || raw === "yes") return true;
   if (raw === "0" || raw === "false" || raw === "no") return false;
   return process.env.NODE_ENV !== "production";
@@ -154,24 +156,39 @@ export const getTelegramBot = () => {
   return botSingleton;
 };
 
+export const stopTelegramBot = (reason = "shutdown") => {
+  if (!botSingleton) return;
+  try {
+    botSingleton.stop(reason);
+  } catch {
+    // ignore
+  }
+};
+
 export async function startTelegramBot() {
   if (isStarted) return;
   isStarted = true;
 
   const bot = getTelegramBot();
 
-  console.log("[BOOT]: telegram bot starting...");
-  console.log("[BOOT]: backend baseURL:", botApiService.getBaseUrl());
+  if (isBotDebugEnabled()) {
+    console.log("[BOOT]: telegram bot starting...");
+    console.log("[BOOT]: backend baseURL:", botApiService.getBaseUrl());
+  }
 
   const adminChatIdRaw = process.env.TELEGRAM_ADMIN_CHAT_ID;
-  console.log(
-    "[BOOT]: TELEGRAM_ADMIN_CHAT_ID:",
-    adminChatIdRaw ? "set" : "missing",
-  );
+  if (isBotDebugEnabled()) {
+    console.log(
+      "[BOOT]: TELEGRAM_ADMIN_CHAT_ID:",
+      adminChatIdRaw ? "set" : "missing",
+    );
+  }
 
   try {
     const ping = await botApiService.ping();
-    console.log("[BOOT]: backend ping OK:", ping.reply);
+    if (isBotDebugEnabled()) {
+      console.log("[BOOT]: backend ping OK:", ping.reply);
+    }
   } catch (err) {
     console.error("[ERROR SOURCE]: telegram.boot.backendPing");
     console.error(err instanceof Error ? (err.stack ?? err.message) : err);
@@ -179,11 +196,13 @@ export async function startTelegramBot() {
 
   try {
     const me = await bot.telegram.getMe();
-    console.log("[BOOT]: telegram API OK:", {
-      id: me.id,
-      username: (me as any).username,
-      first_name: (me as any).first_name,
-    });
+    if (isBotDebugEnabled()) {
+      console.log("[BOOT]: telegram API OK:", {
+        id: me.id,
+        username: (me as any).username,
+        first_name: (me as any).first_name,
+      });
+    }
   } catch (err) {
     console.error("[ERROR SOURCE]: telegram.boot.getMe");
     console.error(err instanceof Error ? (err.stack ?? err.message) : err);
@@ -192,22 +211,21 @@ export async function startTelegramBot() {
   if (shouldUseWebhook()) {
     const baseUrl = resolvePublicBaseUrl();
     if (!baseUrl) {
-      console.warn(
+      console.error(
         "[BOOT]: TELEGRAM_USE_WEBHOOK enabled but BASE_URL is missing; falling back to long polling",
       );
     } else {
       const webhookUrl = `${baseUrl}${TELEGRAM_WEBHOOK_PATH}`;
       try {
         await bot.telegram.setWebhook(webhookUrl);
-        console.log("✅ Telegram webhook set:", webhookUrl);
-
-        process.once("SIGINT", () => bot.stop("SIGINT"));
-        process.once("SIGTERM", () => bot.stop("SIGTERM"));
+        if (isBotDebugEnabled()) {
+          console.log("[BOOT]: telegram webhook set:", webhookUrl);
+        }
         return;
       } catch (err) {
         console.error("[ERROR SOURCE]: telegram.boot.setWebhook");
         console.error(err instanceof Error ? (err.stack ?? err.message) : err);
-        console.warn("[BOOT]: Falling back to long polling...");
+        console.error("[BOOT]: Falling back to long polling...");
       }
     }
   }
@@ -220,10 +238,9 @@ export async function startTelegramBot() {
   }
 
   await bot.launch();
-  console.log("🤖 Bot is running (long polling)...");
-
-  process.once("SIGINT", () => bot.stop("SIGINT"));
-  process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  if (isBotDebugEnabled()) {
+    console.log("[BOOT]: bot is running (long polling)...");
+  }
 }
 
 if (require.main === module) {

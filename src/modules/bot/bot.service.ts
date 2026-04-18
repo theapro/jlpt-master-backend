@@ -1058,13 +1058,19 @@ const handleAskPhone = async (
 
   let courseTitle = String(pendingCourseId);
   try {
-    const course = await courseService.getById(pendingCourseId);
-    courseTitle = course.title;
+    const list = await courseService.getActiveForBot();
+    const found = Array.isArray(list)
+      ? list.find((c: any) => (c as any)?.id === pendingCourseId)
+      : null;
+    if (found && typeof (found as any).title === "string") {
+      const t = String((found as any).title).trim();
+      if (t.length > 0) courseTitle = t;
+    }
   } catch {
     // ignore
   }
 
-  await notifyAdmin(
+  void notifyAdmin(
     "🆕 Yangi ro‘yxatdan o‘tish\n\n" +
       `👤 Ism: ${user.name}\n` +
       `📱 Tel: ${phone}\n` +
@@ -1152,7 +1158,7 @@ const handleSupport = async (
   const phoneLine = user.phone ? `\n📞 Phone: ${user.phone}` : "";
   const requestLine = request ? `\n🧾 Request: ${request.id}` : "";
 
-  await notifyAdmin(
+  void notifyAdmin(
     `💬 Operatorga yangi xabar:\n\n` +
       `👤 Ism: ${user.name}\n` +
       `🆔 ID: ${user.telegramId}` +

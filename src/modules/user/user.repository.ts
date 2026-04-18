@@ -1,8 +1,12 @@
-import type { UserExperience, UserLearningFormat } from "@prisma/client";
+import type {
+  Prisma,
+  UserExperience,
+  UserLearningFormat,
+} from "@prisma/client";
 
 import { prisma } from "../../shared/prisma";
 
-const adminUserSelect = {
+const botUserSelect = {
   id: true,
   telegramId: true,
   name: true,
@@ -18,21 +22,84 @@ const adminUserSelect = {
   learningFormat: true,
 
   supportAdminId: true,
-  supportAdmin: {
-    select: {
-      id: true,
-      name: true,
-    },
-  },
 
   isInSupport: true,
   supportStatus: true,
   createdAt: true,
 } as const;
 
+type BotUser = Prisma.UserGetPayload<{ select: typeof botUserSelect }>;
+
+const adminUserSelect = {
+  ...botUserSelect,
+  supportAdmin: {
+    select: {
+      id: true,
+      name: true,
+    },
+  },
+} as const;
+
+const USER_CACHE_TTL_MS = 5 * 60 * 1000;
+const USER_CACHE_MAX = 10_000;
+
+const userCache = new Map<
+  string,
+  { loadedAt: number; value: BotUser | null }
+>();
+const userPromiseCache = new Map<string, Promise<BotUser | null>>();
+
+const pruneUserCacheIfNeeded = () => {
+  if (userCache.size <= USER_CACHE_MAX) return;
+  const overflow = userCache.size - USER_CACHE_MAX;
+  for (let i = 0; i < overflow; i++) {
+    const oldestKey = userCache.keys().next().value as string | undefined;
+    if (!oldestKey) break;
+    userCache.delete(oldestKey);
+  }
+};
+
+const getCachedUser = (telegramId: string) => {
+  const entry = userCache.get(telegramId);
+  if (!entry) return undefined;
+
+  const now = Date.now();
+  if (now - entry.loadedAt > USER_CACHE_TTL_MS) {
+    userCache.delete(telegramId);
+    return undefined;
+  }
+
+  return entry.value;
+};
+
+const setCachedUser = (telegramId: string, value: BotUser | null) => {
+  if (userCache.has(telegramId)) {
+    userCache.delete(telegramId);
+  }
+  userCache.set(telegramId, { loadedAt: Date.now(), value });
+  pruneUserCacheIfNeeded();
+};
+
 export const userRepository = {
   findByTelegramId: async (telegramId: string) => {
-    return prisma.user.findUnique({ where: { telegramId } });
+    const cached = getCachedUser(telegramId);
+    if (cached !== undefined) return cached;
+
+    const inFlight = userPromiseCache.get(telegramId);
+    if (inFlight) return inFlight;
+
+    const promise = prisma.user
+      .findUnique({ where: { telegramId }, select: botUserSelect })
+      .then((user) => {
+        setCachedUser(telegramId, user);
+        return user;
+      })
+      .finally(() => {
+        userPromiseCache.delete(telegramId);
+      });
+
+    userPromiseCache.set(telegramId, promise);
+    return promise;
   },
 
   findManyByTelegramIds: async (telegramIds: string[]) => {
@@ -89,13 +156,16 @@ export const userRepository = {
       learningFormat?: UserLearningFormat | null;
     },
   ) => {
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { telegramId },
       data,
       select: {
-        ...adminUserSelect,
+        ...botUserSelect,
       },
     });
+
+    setCachedUser(telegramId, updated);
+    return updated;
   },
 
   upsertByTelegramId: async (data: {
@@ -103,7 +173,7 @@ export const userRepository = {
     telegramNickname: string;
     telegramUsername: string | null;
   }) => {
-    return prisma.user.upsert({
+    const user = await prisma.user.upsert({
       where: { telegramId: data.telegramId },
       update: {
         telegramNickname: data.telegramNickname,
@@ -116,26 +186,32 @@ export const userRepository = {
         telegramUsername: data.telegramUsername,
       },
       select: {
-        ...adminUserSelect,
+        ...botUserSelect,
       },
     });
+
+    setCachedUser(user.telegramId, user);
+    return user;
   },
 
   updatePhoneByTelegramId: async (telegramId: string, phone: string | null) => {
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { telegramId },
       data: { phone },
       select: {
-        ...adminUserSelect,
+        ...botUserSelect,
       },
     });
+
+    setCachedUser(telegramId, updated);
+    return updated;
   },
 
   updateSupportStatusByTelegramId: async (
     telegramId: string,
     status: "none" | "pending" | "active" | "closed",
   ) => {
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { telegramId },
       data: {
         isInSupport: status === "pending" || status === "active",
@@ -143,9 +219,12 @@ export const userRepository = {
         ...(status === "none" ? { supportAdminId: null } : {}),
       },
       select: {
-        ...adminUserSelect,
+        ...botUserSelect,
       },
     });
+
+    setCachedUser(telegramId, updated);
+    return updated;
   },
 
   updateSupportStatusByIdForAdmin: async (
@@ -153,7 +232,7 @@ export const userRepository = {
     status: "none" | "pending" | "active" | "closed",
     supportAdminId?: number | null,
   ) => {
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id },
       data: {
         isInSupport: status === "pending" || status === "active",
@@ -165,6 +244,9 @@ export const userRepository = {
         ...adminUserSelect,
       },
     });
+
+    setCachedUser(updated.telegramId, updated);
+    return updated;
   },
 
   create: async (data: {
@@ -172,11 +254,14 @@ export const userRepository = {
     name: string;
     phone?: string | null;
   }) => {
-    return prisma.user.create({
+    const created = await prisma.user.create({
       data,
       select: {
         ...adminUserSelect,
       },
     });
+
+    setCachedUser(created.telegramId, created);
+    return created;
   },
 };

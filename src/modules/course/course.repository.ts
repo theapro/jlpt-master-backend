@@ -10,6 +10,11 @@ const courseSelect = {
   updatedAt: true,
 } as const;
 
+const courseSelectForBotActiveList = {
+  id: true,
+  title: true,
+} as const;
+
 export const courseRepository = {
   create: async (data: {
     title: string;
@@ -57,7 +62,7 @@ export const courseRepository = {
       where: { isActive: true },
       orderBy: { createdAt: "desc" },
       select: {
-        ...courseSelect,
+        ...courseSelectForBotActiveList,
       },
     });
   },

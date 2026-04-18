@@ -9,18 +9,33 @@ import {
 import { courseRepository } from "./course.repository";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
-let activeCoursesCache:
-  | Awaited<ReturnType<typeof courseRepository.findActive>>
-  | null = null;
+let activeCoursesCache: Awaited<
+  ReturnType<typeof courseRepository.findActive>
+> | null = null;
 let activeCoursesCacheLoadedAt = 0;
 let activeCoursesRefreshPromise: Promise<
   Awaited<ReturnType<typeof courseRepository.findActive>>
+> | null = null;
+
+let courseByIdCache: Map<
+  number,
+  {
+    loadedAt: number;
+    value: Awaited<ReturnType<typeof courseRepository.findById>>;
+  }
+> | null = null;
+
+let courseByIdPromiseCache: Map<
+  number,
+  Promise<Awaited<ReturnType<typeof courseRepository.findById>>>
 > | null = null;
 
 const invalidateActiveCoursesCache = () => {
   activeCoursesCache = null;
   activeCoursesCacheLoadedAt = 0;
   activeCoursesRefreshPromise = null;
+  courseByIdCache = null;
+  courseByIdPromiseCache = null;
 };
 
 const getActiveCoursesCached = async () => {
@@ -47,6 +62,31 @@ const getActiveCoursesCached = async () => {
   }
 
   return activeCoursesRefreshPromise;
+};
+
+const getCourseByIdCached = async (id: number) => {
+  if (!courseByIdCache) courseByIdCache = new Map();
+  if (!courseByIdPromiseCache) courseByIdPromiseCache = new Map();
+
+  const now = Date.now();
+  const cached = courseByIdCache.get(id) ?? null;
+  if (cached && now - cached.loadedAt < CACHE_TTL_MS) return cached.value;
+
+  const inFlight = courseByIdPromiseCache.get(id) ?? null;
+  if (inFlight) return inFlight;
+
+  const promise = courseRepository
+    .findById(id)
+    .then((course) => {
+      courseByIdCache!.set(id, { loadedAt: Date.now(), value: course });
+      return course;
+    })
+    .finally(() => {
+      courseByIdPromiseCache!.delete(id);
+    });
+
+  courseByIdPromiseCache.set(id, promise);
+  return promise;
 };
 
 const parseIsActive = (value: unknown) => {
@@ -158,7 +198,7 @@ export const courseService = {
   getActiveForBot: async () => getActiveCoursesCached(),
 
   getById: async (id: number) => {
-    const course = await courseRepository.findById(id);
+    const course = await getCourseByIdCached(id);
     if (!course) throw new AppError(404, "Course not found");
     return course;
   },

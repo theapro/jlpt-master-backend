@@ -1,6 +1,7 @@
 import type { Context } from "telegraf";
 
 import { botService } from "../../modules/bot/bot.service";
+import { perfMetrics } from "../../shared/perf-metrics";
 import { replyKeyboard } from "../keyboards/main.keyboard";
 
 const getTelegramId = (ctx: Context) => {
@@ -19,20 +20,44 @@ export const startHandler = async (ctx: Context) => {
   const telegramId = getTelegramId(ctx);
   if (!telegramId) return;
 
+  const endUpdate = perfMetrics.span("telegram.update.total");
+  const endTotal = perfMetrics.span("telegram.start.total");
+
   try {
-    const result = await botService.start(
-      telegramId,
-      getDisplayName(ctx),
-      ctx.from?.username ?? null,
-    );
-    await ctx.reply(result.reply, replyKeyboard(result.buttons));
+    const result = await (async () => {
+      const end = perfMetrics.span("telegram.start.botService");
+      try {
+        return await botService.start(
+          telegramId,
+          getDisplayName(ctx),
+          ctx.from?.username ?? null,
+        );
+      } finally {
+        end();
+      }
+    })();
+
+    const endReply = perfMetrics.span("telegram.start.reply");
+    try {
+      await ctx.reply(result.reply, replyKeyboard(result.buttons));
+    } finally {
+      endReply();
+    }
   } catch (err) {
     console.error("[ERROR SOURCE]: telegram.start.handler");
     console.error(err instanceof Error ? (err.stack ?? err.message) : err);
 
-    await ctx.reply(
-      "Xatolik yuz berdi, qaytadan urinib ko‘ring",
-      replyKeyboard([["🏠 Menu"]]),
-    );
+    const endReply = perfMetrics.span("telegram.start.reply");
+    try {
+      await ctx.reply(
+        "Xatolik yuz berdi, qaytadan urinib ko‘ring",
+        replyKeyboard([["🏠 Menu"]]),
+      );
+    } finally {
+      endReply();
+    }
+  } finally {
+    endTotal();
+    endUpdate();
   }
 };

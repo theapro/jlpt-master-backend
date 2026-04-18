@@ -9,11 +9,57 @@ import { userRepository } from "./user.repository";
 const isDebug = process.env.NODE_ENV !== "production";
 
 const isBotTrafficLoggingEnabled = (() => {
-  const raw = String(process.env.BOT_DEBUG ?? "").toLowerCase().trim();
+  const raw = String(process.env.BOT_DEBUG ?? "")
+    .toLowerCase()
+    .trim();
   if (raw === "1" || raw === "true" || raw === "yes") return true;
   if (raw === "0" || raw === "false" || raw === "no") return false;
   return isDebug;
 })();
+
+const USER_UPSERT_CACHE_TTL_MS = 10 * 60 * 1000;
+const USER_UPSERT_CACHE_MAX = 10_000;
+
+type UpsertedUser = Awaited<
+  ReturnType<(typeof userRepository)["upsertByTelegramId"]>
+>;
+
+const getOrCreateUserCache = new Map<
+  string,
+  {
+    loadedAt: number;
+    telegramNickname: string;
+    telegramUsername: string | null;
+    user: UpsertedUser;
+  }
+>();
+
+const getOrCreateUserPromiseCache = new Map<string, Promise<UpsertedUser>>();
+
+const pruneGetOrCreateUserCacheIfNeeded = () => {
+  if (getOrCreateUserCache.size <= USER_UPSERT_CACHE_MAX) return;
+  const overflow = getOrCreateUserCache.size - USER_UPSERT_CACHE_MAX;
+  for (let i = 0; i < overflow; i++) {
+    const oldestKey = getOrCreateUserCache.keys().next().value as
+      | string
+      | undefined;
+    if (!oldestKey) break;
+    getOrCreateUserCache.delete(oldestKey);
+  }
+};
+
+const getCachedUpsertedUser = (telegramId: string) => {
+  const cached = getOrCreateUserCache.get(telegramId);
+  if (!cached) return null;
+
+  const now = Date.now();
+  if (now - cached.loadedAt > USER_UPSERT_CACHE_TTL_MS) {
+    getOrCreateUserCache.delete(telegramId);
+    return null;
+  }
+
+  return cached;
+};
 
 const supportStatuses = new Set<string>([
   "none",
@@ -132,11 +178,46 @@ export const userService = {
       throw new AppError(400, "telegramUsername is too long");
 
     try {
-      const user = await userRepository.upsertByTelegramId({
-        telegramId,
-        telegramNickname,
-        telegramUsername,
-      });
+      const cached = getCachedUpsertedUser(telegramId);
+      if (
+        cached &&
+        cached.telegramNickname === telegramNickname &&
+        cached.telegramUsername === telegramUsername
+      ) {
+        return cached.user;
+      }
+
+      const promiseKey = `${telegramId}|${telegramNickname}|${telegramUsername ?? ""}`;
+      const inFlight = getOrCreateUserPromiseCache.get(promiseKey) ?? null;
+      if (inFlight) return inFlight;
+
+      const promise = userRepository
+        .upsertByTelegramId({
+          telegramId,
+          telegramNickname,
+          telegramUsername,
+        })
+        .then((user) => {
+          if (getOrCreateUserCache.has(telegramId)) {
+            getOrCreateUserCache.delete(telegramId);
+          }
+          getOrCreateUserCache.set(telegramId, {
+            loadedAt: Date.now(),
+            telegramNickname,
+            telegramUsername,
+            user,
+          });
+          pruneGetOrCreateUserCacheIfNeeded();
+          return user;
+        })
+        .finally(() => {
+          getOrCreateUserPromiseCache.delete(promiseKey);
+        });
+
+      getOrCreateUserPromiseCache.set(promiseKey, promise);
+
+      const user = await promise;
+
       if (isBotTrafficLoggingEnabled) {
         console.log("[BOT RESPONSE]:", {
           layer: "user.service",

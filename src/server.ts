@@ -5,7 +5,7 @@ import http from "http";
 import app from "./app";
 import { realtimeWs } from "./realtime/ws";
 import { prisma } from "./shared/prisma";
-import { startTelegramBot } from "./telegram/bot";
+import { startTelegramBot, stopTelegramBot } from "./telegram/bot";
 
 const HOST = "0.0.0.0";
 
@@ -33,6 +33,60 @@ const boot = async () => {
 
   const server = http.createServer(app);
   realtimeWs.init(server);
+
+  let isShuttingDown = false;
+
+  const shutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+
+    console.log(`[BOOT]: received ${signal}, shutting down...`);
+
+    try {
+      stopTelegramBot(signal);
+    } catch {
+      // ignore
+    }
+
+    try {
+      await realtimeWs.close();
+    } catch {
+      // ignore
+    }
+
+    try {
+      (server as any).closeIdleConnections?.();
+    } catch {
+      // ignore
+    }
+
+    try {
+      (server as any).closeAllConnections?.();
+    } catch {
+      // ignore
+    }
+
+    await new Promise<void>((resolve) => {
+      try {
+        server.close(() => resolve());
+      } catch {
+        resolve();
+      }
+    });
+
+    try {
+      await prisma.$disconnect();
+    } catch {
+      // ignore
+    }
+  };
+
+  process.once("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+  process.once("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
 
   server.listen(PORT, HOST, () => {
     console.log("✅ Backend running on port:", PORT);

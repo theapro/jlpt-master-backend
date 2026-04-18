@@ -8,6 +8,17 @@ import type {
   BotStartBody,
 } from "../modules/bot/bot.types";
 
+const isDebug = process.env.NODE_ENV !== "production";
+
+const isBotDebugEnabled = (() => {
+  const raw = String(process.env.BOT_DEBUG ?? "")
+    .toLowerCase()
+    .trim();
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  if (raw === "0" || raw === "false" || raw === "no") return false;
+  return isDebug;
+})();
+
 const resolveBaseUrl = () => {
   const configured =
     process.env.BOT_BACKEND_URL ??
@@ -79,7 +90,9 @@ const post = async <TBody>(path: string, body: TBody): Promise<BotResponse> => {
       console.error(err instanceof Error ? (err.stack ?? err.message) : err);
 
       if (attempt === 1 && shouldRetry(err)) {
-        console.log("[RETRY]:", { path, attempt, baseURL });
+        if (isBotDebugEnabled) {
+          console.log("[RETRY]:", { path, attempt, baseURL });
+        }
         await sleep(300);
         continue;
       }
@@ -104,10 +117,12 @@ const get = async (path: string): Promise<BotResponse> => {
       // Avoid noisy stack traces during local startup race (bot starts before server)
       if (shouldRetry(err) && attempt < 10) {
         if (attempt === 1) {
-          console.log("[WAIT]: backend not ready, retrying...", {
-            path,
-            baseURL,
-          });
+          if (isBotDebugEnabled) {
+            console.log("[WAIT]: backend not ready, retrying...", {
+              path,
+              baseURL,
+            });
+          }
         }
         await sleep(300);
         continue;

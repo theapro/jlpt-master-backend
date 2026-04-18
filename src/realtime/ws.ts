@@ -88,4 +88,23 @@ export const realtimeWs = {
   emitMessageCreated: (message: unknown) => {
     realtimeWs.broadcast({ type: "message.created", message });
   },
+
+  close: async () => {
+    if (!wss) return;
+
+    for (const socket of clients.keys()) {
+      try {
+        socket.close(1001, "Server shutting down");
+      } catch {
+        // ignore
+      }
+    }
+    clients.clear();
+
+    await new Promise<void>((resolve) => {
+      wss!.close(() => resolve());
+    });
+
+    wss = null;
+  },
 };

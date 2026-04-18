@@ -14,6 +14,10 @@ const enrollmentSelect = {
   course: { select: { id: true, title: true, isActive: true } },
 } as const;
 
+const enrollmentSelectForBotUpsert = {
+  id: true,
+} as const;
+
 export const enrollmentRepository = {
   create: async (data: {
     userId: number;
@@ -58,7 +62,7 @@ export const enrollmentRepository = {
         format: data.format ?? undefined,
       },
       select: {
-        ...enrollmentSelect,
+        ...enrollmentSelectForBotUpsert,
       },
     });
   },

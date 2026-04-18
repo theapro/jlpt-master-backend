@@ -26,6 +26,13 @@ router.get(
 );
 
 router.get(
+  "/bot-metrics",
+  requireAdminAuth,
+  requireRole(AdminRole.admin, AdminRole.super_admin),
+  adminController.botMetrics,
+);
+
+router.get(
   "/me",
   requireAdminAuth,
   requireRole(AdminRole.admin, AdminRole.super_admin),
