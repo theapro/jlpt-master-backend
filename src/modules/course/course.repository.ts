@@ -75,4 +75,13 @@ export const courseRepository = {
       },
     });
   },
+
+  deleteById: async (id: number) => {
+    return prisma.course.delete({
+      where: { id },
+      select: {
+        ...courseSelect,
+      },
+    });
+  },
 };

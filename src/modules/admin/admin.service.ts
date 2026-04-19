@@ -640,6 +640,31 @@ export const adminService = {
     return { admin };
   },
 
+  deleteAdmin: async (actor: { id: number; role: AdminRole }, id: number) => {
+    if (actor.role !== AdminRole.super_admin) {
+      throw new AppError(403, "Forbidden");
+    }
+
+    const existing = await adminRepository.findById(id);
+    if (!existing) throw new AppError(404, "Admin not found");
+
+    if (existing.id === actor.id) {
+      throw new AppError(400, "You cannot delete your own account");
+    }
+
+    if (existing.role === AdminRole.super_admin) {
+      const superAdminCount = await adminRepository.countByRole(
+        AdminRole.super_admin,
+      );
+      if (superAdminCount <= 1) {
+        throw new AppError(400, "Cannot delete the last super admin");
+      }
+    }
+
+    const admin = await adminRepository.deleteById(id);
+    return { admin };
+  },
+
   replyToUser: async (adminId: number, body: any) => {
     const telegramId = parseTelegramId(body?.telegramId);
     const text = sanitizeOutboundText(body?.message);

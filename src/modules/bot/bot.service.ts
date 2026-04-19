@@ -476,7 +476,35 @@ const buildGoalStep = async (
   const labelToGoalTitle = new Map<string, string>();
   const labels: string[] = [];
 
-  for (const g of goals.slice(0, MAX_LIST_ITEMS)) {
+  const goalIds = goals
+    .map((goal) =>
+      typeof (goal as any)?.id === "number" && (goal as any).id > 0
+        ? ((goal as any).id as number)
+        : null,
+    )
+    .filter((id): id is number => typeof id === "number");
+
+  const orderedGoalIds = await botButtonService.getOrderedGoalIds(goalIds);
+  const goalById = new Map(
+    goals
+      .map((goal) => {
+        const id =
+          typeof (goal as any)?.id === "number" && (goal as any).id > 0
+            ? ((goal as any).id as number)
+            : null;
+        return id ? ([id, goal] as const) : null;
+      })
+      .filter((entry): entry is readonly [number, (typeof goals)[number]] =>
+        Array.isArray(entry),
+      ),
+  );
+
+  const orderedGoals = orderedGoalIds
+    .map((id) => goalById.get(id) ?? null)
+    .filter((goal): goal is (typeof goals)[number] => goal !== null)
+    .slice(0, MAX_LIST_ITEMS);
+
+  for (const g of orderedGoals) {
     const id = typeof (g as any)?.id === "number" ? (g as any).id : 0;
     const title = typeof g.title === "string" ? g.title.trim() : "";
     const base = `${goalPrefix}${title}`;
@@ -543,7 +571,34 @@ const buildCourseStep = async (): Promise<{
   const labelToCourse = new Map<string, { courseId: number }>();
   const labels: string[] = [];
 
-  const sorted = courses.slice(0, MAX_LIST_ITEMS);
+  const courseIds = courses
+    .map((course) =>
+      typeof (course as any)?.id === "number" && (course as any).id > 0
+        ? ((course as any).id as number)
+        : null,
+    )
+    .filter((id): id is number => typeof id === "number");
+
+  const orderedCourseIds =
+    await botButtonService.getOrderedCourseIds(courseIds);
+  const courseById = new Map(
+    courses
+      .map((course) => {
+        const id =
+          typeof (course as any)?.id === "number" && (course as any).id > 0
+            ? ((course as any).id as number)
+            : null;
+        return id ? ([id, course] as const) : null;
+      })
+      .filter((entry): entry is readonly [number, (typeof courses)[number]] =>
+        Array.isArray(entry),
+      ),
+  );
+
+  const sorted = orderedCourseIds
+    .map((id) => courseById.get(id) ?? null)
+    .filter((course): course is (typeof courses)[number] => course !== null)
+    .slice(0, MAX_LIST_ITEMS);
 
   for (const c of sorted) {
     const id = typeof (c as any)?.id === "number" ? (c as any).id : 0;

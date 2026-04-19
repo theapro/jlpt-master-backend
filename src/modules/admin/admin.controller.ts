@@ -62,6 +62,14 @@ export const adminController = {
     res.status(200).json(result);
   }) as RequestHandler,
 
+  deleteAdmin: asyncHandler(async (req, res) => {
+    if (!req.admin) throw new AppError(401, "Unauthorized");
+    const id = parsePositiveInt(req.params.id);
+    if (!id) throw new AppError(400, "Invalid admin id");
+    const result = await adminService.deleteAdmin(req.admin, id);
+    res.status(200).json(result);
+  }) as RequestHandler,
+
   reply: asyncHandler(async (req, res) => {
     if (!req.admin) throw new AppError(401, "Unauthorized");
     const result = await adminService.replyToUser(req.admin.id, req.body);

@@ -35,4 +35,11 @@ router.patch(
   adminController.updateAdmin,
 );
 
+router.delete(
+  "/:id",
+  requireAdminAuth,
+  requireRole(AdminRole.super_admin),
+  adminController.deleteAdmin,
+);
+
 export const adminsRoutes = router;

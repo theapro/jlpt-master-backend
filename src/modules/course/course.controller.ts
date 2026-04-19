@@ -34,7 +34,7 @@ export const courseController = {
     if (!req.admin) throw new AppError(401, "Unauthorized");
     const id = parsePositiveInt(req.params.id);
     if (!id) throw new AppError(400, "Invalid course id");
-    const course = await courseService.softDelete(req.admin, id);
+    const course = await courseService.hardDelete(req.admin, id);
     res.status(200).json({ course });
   }) as RequestHandler,
 };

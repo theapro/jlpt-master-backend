@@ -9,6 +9,8 @@ import {
 
 export const BOT_BUTTON_ADMIN_STATES = [
   "SELECT_EXPERIENCE",
+  "ASK_GOAL",
+  "SELECT_COURSE",
   "ASK_FORMAT",
   "REGISTER",
   "ASK_PHONE",
@@ -41,6 +43,17 @@ export const BOT_BUTTON_ACTION = {
 
 export type BotButtonAction =
   (typeof BOT_BUTTON_ACTION)[keyof typeof BOT_BUTTON_ACTION];
+
+const DYNAMIC_ORDER_ACTION_PREFIX = {
+  ASK_GOAL: "GOAL:",
+  SELECT_COURSE: "COURSE:",
+} as const;
+
+type DynamicOrderState = keyof typeof DYNAMIC_ORDER_ACTION_PREFIX;
+
+const isDynamicOrderState = (value: string): value is DynamicOrderState => {
+  return value === "ASK_GOAL" || value === "SELECT_COURSE";
+};
 
 type ButtonLike = {
   label: string;
@@ -221,6 +234,163 @@ const parseIsActive = (raw: unknown) => {
   throw new AppError(400, "Invalid isActive value");
 };
 
+const parseDynamicEntityIdFromAction = (
+  action: string | null,
+  state: DynamicOrderState,
+) => {
+  if (!isNonEmptyString(action)) return null;
+
+  const prefix = DYNAMIC_ORDER_ACTION_PREFIX[state];
+  const normalized = normalizeString(action);
+  if (!normalized.startsWith(prefix)) return null;
+
+  const rawId = normalized.slice(prefix.length);
+  const id = Number(rawId);
+  if (!Number.isInteger(id) || id <= 0) return null;
+  return id;
+};
+
+const getDynamicStateEntities = async (state: DynamicOrderState) => {
+  if (state === "ASK_GOAL") {
+    return prisma.goal.findMany({
+      where: { isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+      select: { id: true, title: true },
+    });
+  }
+
+  return prisma.course.findMany({
+    where: { isActive: true },
+    orderBy: [{ createdAt: "desc" }],
+    select: { id: true, title: true },
+  });
+};
+
+const toGridPosition = (index: number) => ({
+  row: Math.floor(index / 2),
+  col: index % 2,
+});
+
+const toDynamicAction = (state: DynamicOrderState, id: number) => {
+  return `${DYNAMIC_ORDER_ACTION_PREFIX[state]}${id}`;
+};
+
+const toDynamicLabel = (value: string) => {
+  const normalized = normalizeString(value);
+  return normalized.length > 191 ? normalized.slice(0, 191) : normalized;
+};
+
+const syncDynamicStateButtons = async (state: DynamicOrderState) => {
+  const [entities, existing] = await Promise.all([
+    getDynamicStateEntities(state),
+    prisma.botButton.findMany({
+      where: { state },
+      orderBy: [{ row: "asc" }, { col: "asc" }, { createdAt: "asc" }],
+    }),
+  ]);
+
+  const entityById = new Map(entities.map((entity) => [entity.id, entity]));
+
+  const orderedIds: number[] = [];
+  const seen = new Set<number>();
+
+  for (const button of existing) {
+    const parsedId = parseDynamicEntityIdFromAction(button.action, state);
+    if (!parsedId || !entityById.has(parsedId) || seen.has(parsedId)) continue;
+    orderedIds.push(parsedId);
+    seen.add(parsedId);
+  }
+
+  for (const entity of entities) {
+    if (seen.has(entity.id)) continue;
+    orderedIds.push(entity.id);
+    seen.add(entity.id);
+  }
+
+  const desired = orderedIds.map((id, index) => {
+    const entity = entityById.get(id)!;
+    const pos = toGridPosition(index);
+    return {
+      action: toDynamicAction(state, entity.id),
+      label: toDynamicLabel(entity.title),
+      row: pos.row,
+      col: pos.col,
+    };
+  });
+
+  const isAligned =
+    existing.length === desired.length &&
+    desired.every((next, index) => {
+      const current = existing[index];
+      if (!current) return false;
+      return (
+        current.action === next.action &&
+        current.label === next.label &&
+        current.row === next.row &&
+        current.col === next.col &&
+        current.isActive === true
+      );
+    });
+
+  if (isAligned) return existing;
+
+  const createRows = desired.map((item) => ({
+    state,
+    action: item.action,
+    label: item.label,
+    row: item.row,
+    col: item.col,
+    isActive: true,
+  }));
+
+  if (createRows.length === 0) {
+    await prisma.botButton.deleteMany({ where: { state } });
+  } else {
+    await prisma.$transaction([
+      prisma.botButton.deleteMany({ where: { state } }),
+      prisma.botButton.createMany({ data: createRows }),
+    ]);
+  }
+
+  invalidateActiveButtonsCache();
+
+  return prisma.botButton.findMany({
+    where: { state },
+    orderBy: [{ row: "asc" }, { col: "asc" }],
+  });
+};
+
+const getDynamicOrderIds = async (
+  state: DynamicOrderState,
+  entityIds: number[],
+) => {
+  const idSet = new Set(entityIds);
+  const ordered: number[] = [];
+  const seen = new Set<number>();
+
+  let buttons: BotButton[] = [];
+  try {
+    buttons = await getActiveButtonsByStateCached(state);
+  } catch {
+    buttons = [];
+  }
+
+  for (const button of buttons) {
+    const parsedId = parseDynamicEntityIdFromAction(button.action, state);
+    if (!parsedId || !idSet.has(parsedId) || seen.has(parsedId)) continue;
+    ordered.push(parsedId);
+    seen.add(parsedId);
+  }
+
+  for (const id of entityIds) {
+    if (seen.has(id)) continue;
+    ordered.push(id);
+    seen.add(id);
+  }
+
+  return ordered;
+};
+
 const inferAction = (args: {
   state: string;
   label: string;
@@ -283,6 +453,14 @@ const resolveDefaultActionByLabel = (state: string, label: string) => {
 };
 
 export const botButtonService = {
+  getOrderedGoalIds: async (goalIds: number[]) => {
+    return getDynamicOrderIds("ASK_GOAL", goalIds);
+  },
+
+  getOrderedCourseIds: async (courseIds: number[]) => {
+    return getDynamicOrderIds("SELECT_COURSE", courseIds);
+  },
+
   getButtonsByState: async (state: string): Promise<string[][]> => {
     try {
       const buttons = await getActiveButtonsByStateCached(state);
@@ -370,6 +548,10 @@ export const botButtonService = {
       });
     }
 
+    if (isDynamicOrderState(state)) {
+      return syncDynamicStateButtons(state);
+    }
+
     const existing = await prisma.botButton.findMany({
       where: { state },
       orderBy: [{ row: "asc" }, { col: "asc" }],
@@ -410,6 +592,10 @@ export const botButtonService = {
     const b = (body ?? {}) as any;
 
     const state = parseState(b.state);
+    if (isDynamicOrderState(state)) {
+      throw new AppError(400, "This state is managed automatically");
+    }
+
     const label = parseLabel(b.label);
     const row = parseRow(b.row);
     const col = parseCol(b.col);
@@ -474,15 +660,33 @@ export const botButtonService = {
     });
     if (rowCount >= 2) throw new AppError(400, "Max 2 buttons per row");
 
-    const nextAction =
+    let nextLabel = label;
+    let nextAction =
       existing.action && existing.action.trim().length > 0
         ? existing.action
         : inferAction({ state: existing.state, label, row, col });
 
+    if (isDynamicOrderState(existing.state)) {
+      const dynamicId = parseDynamicEntityIdFromAction(
+        existing.action,
+        existing.state,
+      );
+      if (!dynamicId) throw new AppError(400, "Invalid dynamic action");
+
+      const entities = await getDynamicStateEntities(existing.state);
+      const match = entities.find((entity) => entity.id === dynamicId) ?? null;
+      if (!match) {
+        throw new AppError(404, "Linked item not found");
+      }
+
+      nextLabel = match.title;
+      nextAction = toDynamicAction(existing.state, dynamicId);
+    }
+
     const updated = await prisma.botButton.update({
       where: { id },
       data: {
-        label,
+        label: nextLabel,
         row,
         col,
         isActive,

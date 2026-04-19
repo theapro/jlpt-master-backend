@@ -54,4 +54,12 @@ export const adminRepository = {
   ) => {
     return prisma.admin.update({ where: { id }, data, select: adminSelect });
   },
+
+  countByRole: async (role: "admin" | "super_admin") => {
+    return prisma.admin.count({ where: { role } });
+  },
+
+  deleteById: async (id: number) => {
+    return prisma.admin.delete({ where: { id }, select: adminSelect });
+  },
 };

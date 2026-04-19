@@ -15,6 +15,8 @@ const ADMIN_KEYBOARD_STATES: BotState[] = [
 
 const EDITABLE_STATES = new Set<BotState>([
   BotState.SELECT_EXPERIENCE,
+  BotState.ASK_GOAL,
+  BotState.SELECT_COURSE,
   BotState.ASK_FORMAT,
   BotState.REGISTER,
   BotState.ASK_PHONE,

@@ -6,6 +6,7 @@ import {
   normalizeString,
   parsePositiveInt,
 } from "../../shared/utils";
+import { prisma } from "../../shared/prisma";
 import { courseRepository } from "./course.repository";
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -203,13 +204,26 @@ export const courseService = {
     return course;
   },
 
-  softDelete: async (admin: { id: number; role: AdminRole }, id: number) => {
+  hardDelete: async (admin: { id: number; role: AdminRole }, id: number) => {
     const existing = await courseRepository.findById(id);
     if (!existing) throw new AppError(404, "Course not found");
 
-    const updated = await courseRepository.updateById(id, { isActive: false });
+    await prisma.$transaction([
+      prisma.user.updateMany({
+        where: { pendingCourseId: id },
+        data: { pendingCourseId: null },
+      }),
+      prisma.botButton.deleteMany({
+        where: {
+          state: "SELECT_COURSE",
+          action: `COURSE:${id}`,
+        },
+      }),
+      prisma.course.delete({ where: { id } }),
+    ]);
+
     invalidateActiveCoursesCache();
-    return updated;
+    return existing;
   },
 
   getFormattedListForBot: async () => {
