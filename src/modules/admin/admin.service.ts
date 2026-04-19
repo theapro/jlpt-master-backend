@@ -103,6 +103,14 @@ const generateResetToken = () => {
 const hashResetToken = (token: string) =>
   createHash("sha256").update(token).digest("hex");
 
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 let googleClient: OAuth2Client | null = null;
 
 const getGoogleClientId = () => {
@@ -416,15 +424,68 @@ export const adminService = {
 
     const resetUrl = `${getAdminPanelUrl()}/reset-password?token=${encodeURIComponent(token)}`;
     const subject = "Reset your JLPT Master admin password";
+    const safeName = escapeHtml(admin.name);
     const text = `Hello ${admin.name},\n\nWe received a request to reset your admin password.\n\nReset link (valid for 60 minutes):\n${resetUrl}\n\nIf you didn't request this, you can ignore this email.`;
-    const html = `
-      <div style="font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; line-height: 1.5;">
-        <p>Hello ${admin.name},</p>
-        <p>We received a request to reset your admin password.</p>
-        <p><a href="${resetUrl}">Click here to reset your password</a> (valid for 60 minutes).</p>
-        <p>If you didn't request this, you can safely ignore this email.</p>
-      </div>
-    `;
+    const html = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${subject}</title>
+  </head>
+  <body style="margin:0;padding:0;background-color:#f6f7f9;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+      Password reset link for your admin account.
+    </div>
+
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f6f7f9;padding:24px 12px;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;line-height:1.5;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;background:#ffffff;border-radius:14px;border:1px solid #e5e7eb;">
+            <tr>
+              <td style="padding:22px 22px 0 22px;font-size:18px;font-weight:700;color:#111827;">
+                JLPT Master — Password reset
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:14px 22px 0 22px;font-size:14px;color:#374151;">
+                Hello ${safeName},
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:10px 22px 0 22px;font-size:14px;color:#374151;">
+                We received a request to reset your admin password. This link is valid for <strong>60 minutes</strong>.
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 22px 0 22px;">
+                <a href="${resetUrl}" style="display:inline-block;background:#111827;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:600;font-size:14px;">
+                  Reset password
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 22px 0 22px;font-size:12px;color:#6b7280;">
+                If the button doesn't work, copy and paste this URL into your browser:
+                <div style="word-break:break-all;margin-top:6px;">
+                  <a href="${resetUrl}" style="color:#111827;text-decoration:underline;">${resetUrl}</a>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 22px 22px 22px;font-size:12px;color:#6b7280;">
+                If you didn't request a password reset, you can safely ignore this email.
+              </td>
+            </tr>
+          </table>
+          <div style="max-width:520px;margin-top:12px;font-size:12px;color:#9ca3af;text-align:center;">
+            © ${new Date().getUTCFullYear()} JLPT Master
+          </div>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
 
     try {
       await sendEmailViaResend({
