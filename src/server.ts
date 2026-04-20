@@ -17,21 +17,85 @@ const PORT = (() => {
   return parsed;
 })();
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+let processErrorHandlersRegistered = false;
+
+const registerProcessErrorHandlers = () => {
+  if (processErrorHandlersRegistered) return;
+  processErrorHandlersRegistered = true;
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("[ERROR SOURCE]: process.unhandledRejection");
+    console.error(
+      reason instanceof Error ? (reason.stack ?? reason.message) : reason,
+    );
+
+    void prisma
+      .$disconnect()
+      .catch(() => {})
+      .then(() => prisma.$connect())
+      .catch((err) => {
+        console.error(
+          "[ERROR SOURCE]: process.unhandledRejection.prismaReconnect",
+        );
+        console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+      });
+  });
+
+  process.on("uncaughtException", (err) => {
+    console.error("[ERROR SOURCE]: process.uncaughtException");
+    console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+  });
+};
+
+const connectDatabaseWithRetry = async () => {
+  const maxAttempts = 6;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await prisma.$connect();
+      await prisma.$queryRaw`SELECT 1`;
+      return;
+    } catch (err) {
+      console.error("[ERROR SOURCE]: backend.boot.database");
+      console.error(
+        { attempt, maxAttempts },
+        err instanceof Error ? (err.stack ?? err.message) : err,
+      );
+
+      if (attempt >= maxAttempts) throw err;
+
+      const delayMs = Math.min(2000, 250 * attempt);
+      await sleep(delayMs);
+    }
+  }
+};
+
 const boot = async () => {
   console.log("[BOOT]: backend starting...");
   console.log("[BOOT]: NODE_ENV:", process.env.NODE_ENV ?? "(not set)");
   console.log("[BOOT]: PORT:", PORT);
 
-  try {
-    await prisma.$connect();
-    await prisma.$queryRaw`SELECT 1`;
-    console.log("[BOOT]: database OK");
-  } catch (err) {
-    console.error("[ERROR SOURCE]: backend.boot.database");
-    console.error(err instanceof Error ? (err.stack ?? err.message) : err);
-  }
+  registerProcessErrorHandlers();
+
+  await connectDatabaseWithRetry();
+  console.log("[BOOT]: database OK");
 
   const server = http.createServer(app);
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 70_000;
+
+  server.on("clientError", (err) => {
+    console.error("[ERROR SOURCE]: http.clientError");
+    console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+  });
+
+  server.on("error", (err) => {
+    console.error("[ERROR SOURCE]: http.server");
+    console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+  });
+
   realtimeWs.init(server);
 
   let isShuttingDown = false;

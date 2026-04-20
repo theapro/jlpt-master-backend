@@ -11,8 +11,8 @@ export const userController = {
 
   listForAdmin: asyncHandler(async (req, res) => {
     if (!req.admin) throw new AppError(401, "Unauthorized");
-    const users = await userService.listForAdmin();
-    res.status(200).json({ users });
+    const result = await userService.listForAdmin(req.query as any);
+    res.status(200).json(result);
   }) as RequestHandler,
 
   getByIdForAdmin: asyncHandler(async (req, res) => {

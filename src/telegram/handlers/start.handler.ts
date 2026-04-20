@@ -2,6 +2,7 @@ import type { Context } from "telegraf";
 
 import { botService } from "../../modules/bot/bot.service";
 import { perfMetrics } from "../../shared/perf-metrics";
+import { adminChatService } from "../admin-chat.service";
 import { replyKeyboard } from "../keyboards/main.keyboard";
 
 const getTelegramId = (ctx: Context) => {
@@ -19,6 +20,8 @@ const getDisplayName = (ctx: Context) => {
 export const startHandler = async (ctx: Context) => {
   const telegramId = getTelegramId(ctx);
   if (!telegramId) return;
+
+  await adminChatService.syncAdminBindingFromContext(ctx);
 
   const endUpdate = perfMetrics.span("telegram.update.total");
   const endTotal = perfMetrics.span("telegram.start.total");

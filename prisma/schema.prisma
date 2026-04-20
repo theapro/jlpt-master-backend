@@ -100,6 +100,8 @@ model Admin {
   id        Int       @id @default(autoincrement())
   name      String    @db.VarChar(100)
   email     String    @unique @db.VarChar(191)
+  tgUsername String?  @unique @db.VarChar(64)
+  tgChatId   String?  @db.VarChar(64)
   password  String    @db.VarChar(255)
   role      AdminRole @default(admin)
   createdAt DateTime  @default(now())
@@ -111,6 +113,7 @@ model Admin {
   hiddenMessages MessageHidden[]
 
   @@index([role])
+  @@index([tgChatId])
   @@index([createdAt])
 }
 

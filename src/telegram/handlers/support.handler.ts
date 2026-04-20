@@ -1,15 +1,20 @@
 import type { Context } from "telegraf";
 
 import type { BotResponse } from "../../modules/bot/bot.types";
+import { adminChatService } from "../admin-chat.service";
 
-const resolveAdminChatId = () => {
-  const raw = process.env.TELEGRAM_ADMIN_CHAT_ID;
-  if (!raw || raw.trim().length === 0) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
+const getChatId = (ctx: Context): string | null => {
+  const direct = ctx.chat?.id;
+  if (typeof direct === "number") return String(direct);
+
+  const cb = (ctx as any).callbackQuery;
+  const cbChatId = cb?.message?.chat?.id;
+  if (typeof cbChatId === "number") return String(cbChatId);
+
+  return null;
 };
 
-const getChatId = (ctx: Context): number | null => {
+const getNumericChatId = (ctx: Context): number | null => {
   const direct = ctx.chat?.id;
   if (typeof direct === "number") return direct;
 
@@ -21,10 +26,16 @@ const getChatId = (ctx: Context): number | null => {
 };
 
 type SupportTarget = { telegramId: string; createdAt: number };
-const targetByAdminMessageId = new Map<number, SupportTarget>();
+const targetByAdminMessageId = new Map<string, SupportTarget>();
 
-const rememberTarget = (adminMessageId: number, userTelegramId: string) => {
-  targetByAdminMessageId.set(adminMessageId, {
+const rememberTarget = (
+  adminChatId: string,
+  adminMessageId: number,
+  userTelegramId: string,
+) => {
+  const key = `${adminChatId}:${adminMessageId}`;
+
+  targetByAdminMessageId.set(key, {
     telegramId: userTelegramId,
     createdAt: Date.now(),
   });
@@ -53,10 +64,15 @@ const extractTelegramIdFromText = (value: unknown): string | null => {
   return m ? m[1] : null;
 };
 
-const resolveTargetFromReplyMessage = (reply: any): string | null => {
+const resolveTargetFromReplyMessage = (
+  adminChatId: string,
+  reply: any,
+): string | null => {
   const replyMessageId = reply?.message_id;
   if (typeof replyMessageId === "number") {
-    const remembered = targetByAdminMessageId.get(replyMessageId);
+    const remembered = targetByAdminMessageId.get(
+      `${adminChatId}:${replyMessageId}`,
+    );
     if (remembered) return remembered.telegramId;
   }
 
@@ -70,18 +86,16 @@ const resolveTargetFromReplyMessage = (reply: any): string | null => {
 };
 
 export const supportHandler = {
-  isAdminChat: (ctx: Context) => {
-    const adminChatId = resolveAdminChatId();
-    if (!adminChatId) return false;
-    return getChatId(ctx) === adminChatId;
+  isAdminChat: async (ctx: Context) => {
+    return adminChatService.isAdminContext(ctx);
   },
 
   notifyAdminIfNeeded: async (ctx: Context, res: BotResponse) => {
     const notification = res.adminNotification;
     if (!notification) return;
 
-    const adminChatId = resolveAdminChatId();
-    if (!adminChatId) return;
+    const targets = await adminChatService.getNotificationTargets();
+    if (targets.length === 0) return;
 
     const user = notification.user;
 
@@ -98,9 +112,24 @@ export const supportHandler = {
         requestLine +
         `\n\nJavob berish uchun shu xabarga Reply qiling.`;
 
-      const sent = await ctx.telegram.sendMessage(adminChatId, text);
-      if (typeof (sent as any)?.message_id === "number") {
-        rememberTarget((sent as any).message_id, user.telegramId);
+      for (const target of targets) {
+        try {
+          const sent = await ctx.telegram.sendMessage(target.chatId, text);
+          if (typeof (sent as any)?.message_id === "number") {
+            rememberTarget(
+              target.chatId,
+              (sent as any).message_id,
+              user.telegramId,
+            );
+          }
+        } catch (err) {
+          console.error(
+            "[ERROR SOURCE]: telegram.support.notify.support_request",
+          );
+          console.error(
+            err instanceof Error ? (err.stack ?? err.message) : err,
+          );
+        }
       }
       return;
     }
@@ -112,40 +141,67 @@ export const supportHandler = {
       requestLine +
       `\n\nAdmin javob berish uchun shu xabarga Reply qiling.`;
 
-    const header = await ctx.telegram.sendMessage(adminChatId, text);
-    if (typeof (header as any)?.message_id === "number") {
-      rememberTarget((header as any).message_id, user.telegramId);
-    }
+    for (const target of targets) {
+      const adminChatId = target.chatId;
 
-    try {
-      const fromChatId = getChatId(ctx);
-      const fromMessageId = (ctx.message as any)?.message_id;
-      if (typeof fromChatId === "number" && typeof fromMessageId === "number") {
-        const fwd = await ctx.telegram.forwardMessage(
-          adminChatId,
-          fromChatId,
-          fromMessageId,
-        );
-        if (typeof (fwd as any)?.message_id === "number") {
-          rememberTarget((fwd as any).message_id, user.telegramId);
+      try {
+        const header = await ctx.telegram.sendMessage(adminChatId, text);
+        if (typeof (header as any)?.message_id === "number") {
+          rememberTarget(
+            adminChatId,
+            (header as any).message_id,
+            user.telegramId,
+          );
         }
-      } else {
-        const fallback = sanitizeText(notification.message);
-        if (fallback.length > 0) {
-          const copy = await ctx.telegram.sendMessage(adminChatId, fallback);
-          if (typeof (copy as any)?.message_id === "number") {
-            rememberTarget((copy as any).message_id, user.telegramId);
+      } catch (err) {
+        console.error(
+          "[ERROR SOURCE]: telegram.support.notify.support_message",
+        );
+        console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+        continue;
+      }
+
+      try {
+        const fromChatId = getNumericChatId(ctx);
+        const fromMessageId = (ctx.message as any)?.message_id;
+        if (
+          typeof fromChatId === "number" &&
+          typeof fromMessageId === "number"
+        ) {
+          const fwd = await ctx.telegram.forwardMessage(
+            adminChatId,
+            fromChatId,
+            fromMessageId,
+          );
+          if (typeof (fwd as any)?.message_id === "number") {
+            rememberTarget(
+              adminChatId,
+              (fwd as any).message_id,
+              user.telegramId,
+            );
+          }
+        } else {
+          const fallback = sanitizeText(notification.message);
+          if (fallback.length > 0) {
+            const copy = await ctx.telegram.sendMessage(adminChatId, fallback);
+            if (typeof (copy as any)?.message_id === "number") {
+              rememberTarget(
+                adminChatId,
+                (copy as any).message_id,
+                user.telegramId,
+              );
+            }
           }
         }
+      } catch (err) {
+        console.error("[ERROR SOURCE]: telegram.support.forwardMessage");
+        console.error(err instanceof Error ? (err.stack ?? err.message) : err);
       }
-    } catch (err) {
-      console.error("[ERROR SOURCE]: telegram.support.forwardMessage");
-      console.error(err instanceof Error ? (err.stack ?? err.message) : err);
     }
   },
 
   onAdminReplyText: async (ctx: Context): Promise<boolean> => {
-    if (!supportHandler.isAdminChat(ctx)) return false;
+    if (!(await supportHandler.isAdminChat(ctx))) return false;
 
     const messageText = sanitizeText((ctx.message as any)?.text);
     if (messageText.length === 0) return false;
@@ -153,7 +209,10 @@ export const supportHandler = {
     const reply = (ctx.message as any)?.reply_to_message;
     if (!reply) return false;
 
-    const userTelegramId = resolveTargetFromReplyMessage(reply);
+    const adminChatId = getChatId(ctx);
+    if (!adminChatId) return false;
+
+    const userTelegramId = resolveTargetFromReplyMessage(adminChatId, reply);
     if (!userTelegramId) {
       await ctx.reply(
         "Xatolik: foydalanuvchi topilmadi. Iltimos support xabariga Reply qiling.",

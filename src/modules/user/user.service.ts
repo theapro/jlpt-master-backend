@@ -76,6 +76,32 @@ const parseSupportStatus = (value: unknown) => {
   return v as "none" | "pending" | "active" | "closed";
 };
 
+const getQueryString = (value: unknown) => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return typeof first === "string" ? first : null;
+  }
+  return null;
+};
+
+const parsePage = (value: unknown) => {
+  const raw = getQueryString(value);
+  if (!raw) return null;
+  const page = Number.parseInt(raw, 10);
+  return Number.isFinite(page) && page > 0 ? page : null;
+};
+
+const parseLimit = (value: unknown) => {
+  const raw = getQueryString(value);
+  if (!raw) return null;
+  const limit = Number.parseInt(raw, 10);
+  return Number.isFinite(limit) && limit > 0 ? limit : null;
+};
+
+const clampInt = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
+
 export const userService = {
   register: async (body: any) => {
     if (isBotTrafficLoggingEnabled) {
@@ -292,8 +318,57 @@ export const userService = {
     }
   },
 
-  listForAdmin: async () => {
-    return userRepository.findAllForAdmin();
+  listForAdmin: async (query?: Record<string, unknown>) => {
+    const qRaw = getQueryString(query?.q)?.trim() ?? "";
+    const q = qRaw.length > 0 ? qRaw : null;
+    const supportStatusRaw = getQueryString(query?.supportStatus)
+      ?.trim()
+      .toLowerCase();
+    const supportStatus =
+      supportStatusRaw === "none" ||
+      supportStatusRaw === "pending" ||
+      supportStatusRaw === "active" ||
+      supportStatusRaw === "closed"
+        ? supportStatusRaw
+        : null;
+
+    const page = clampInt(parsePage(query?.page) ?? 1, 1, 10_000);
+    const limit = clampInt(parseLimit(query?.limit) ?? 10, 1, 50);
+    const skip = (page - 1) * limit;
+
+    const whereAnd: any[] = [];
+
+    if (q) {
+      whereAnd.push({
+        OR: [
+          { name: { contains: q } },
+          { phone: { contains: q } },
+          { telegramUsername: { contains: q.replace(/^@+/, "") } },
+          { telegramNickname: { contains: q } },
+        ],
+      });
+    }
+
+    if (supportStatus) {
+      whereAnd.push({ supportStatus });
+    }
+
+    const where = whereAnd.length > 0 ? { AND: whereAnd } : undefined;
+
+    const [users, total] = await Promise.all([
+      userRepository.findAllForAdmin({ where, skip, take: limit + 1 }),
+      userRepository.countForAdmin(where),
+    ]);
+
+    const pageUsers = users.slice(0, limit);
+
+    return {
+      users: pageUsers,
+      page,
+      limit,
+      total,
+      hasMore: users.length > limit,
+    };
   },
 
   getByIdForAdmin: async (id: number) => {

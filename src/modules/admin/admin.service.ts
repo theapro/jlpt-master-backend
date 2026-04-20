@@ -14,6 +14,7 @@ import { messageService } from "../message/message.service";
 import { supportRepository } from "../bot/support.repository";
 import { userRepository } from "../user/user.repository";
 import { telegramSender } from "../../telegram/telegram.sender";
+import { adminChatService } from "../../telegram/admin-chat.service";
 import { prisma } from "../../shared/prisma";
 import { adminRepository } from "./admin.repository";
 
@@ -188,6 +189,43 @@ const parseAdminRoleOptional = (value: unknown): AdminRole | undefined => {
   if (!isNonEmptyString(value)) throw new AppError(400, "Invalid role");
   return parseAdminRole(value);
 };
+
+const parseAdminTelegramUsername = (value: unknown, required: boolean) => {
+  if (value === undefined || value === null || value === "") {
+    if (required) throw new AppError(400, "tgUsername is required");
+    return undefined;
+  }
+
+  const normalized = adminChatService.normalizeTelegramUsername(value);
+  if (!normalized) throw new AppError(400, "tgUsername is invalid");
+  return normalized;
+};
+
+const getQueryString = (value: unknown) => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return typeof first === "string" ? first : null;
+  }
+  return null;
+};
+
+const parsePage = (value: unknown) => {
+  const raw = getQueryString(value);
+  if (!raw) return null;
+  const page = Number.parseInt(raw, 10);
+  return Number.isFinite(page) && page > 0 ? page : null;
+};
+
+const parseLimit = (value: unknown) => {
+  const raw = getQueryString(value);
+  if (!raw) return null;
+  const limit = Number.parseInt(raw, 10);
+  return Number.isFinite(limit) && limit > 0 ? limit : null;
+};
+
+const clampInt = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
 
 const parseTelegramId = (value: unknown) => {
   const raw =
@@ -570,9 +608,49 @@ export const adminService = {
     return { token, admin };
   },
 
-  listAdmins: async () => {
-    const admins = await adminRepository.findAll();
-    return { admins };
+  listAdmins: async (query?: Record<string, unknown>) => {
+    const qRaw = getQueryString(query?.q)?.trim() ?? "";
+    const q = qRaw.length > 0 ? qRaw : null;
+    const roleRaw = getQueryString(query?.role)?.trim().toLowerCase() ?? "";
+    const role =
+      roleRaw === "admin" || roleRaw === "super_admin" ? roleRaw : null;
+
+    const page = clampInt(parsePage(query?.page) ?? 1, 1, 10_000);
+    const limit = clampInt(parseLimit(query?.limit) ?? 10, 1, 50);
+    const skip = (page - 1) * limit;
+
+    const whereAnd: any[] = [];
+
+    if (q) {
+      whereAnd.push({
+        OR: [
+          { name: { contains: q } },
+          { email: { contains: q } },
+          { tgUsername: { contains: q.replace(/^@+/, "") } },
+        ],
+      });
+    }
+
+    if (role) {
+      whereAnd.push({ role });
+    }
+
+    const where = whereAnd.length > 0 ? { AND: whereAnd } : undefined;
+
+    const [admins, total] = await Promise.all([
+      adminRepository.findAll({ where, skip, take: limit + 1 }),
+      adminRepository.countAll(where),
+    ]);
+
+    const pageAdmins = admins.slice(0, limit);
+
+    return {
+      admins: pageAdmins,
+      page,
+      limit,
+      total,
+      hasMore: admins.length > limit,
+    };
   },
 
   createAdmin: async (body: any) => {
@@ -580,14 +658,27 @@ export const adminService = {
     const email = parseAdminEmail(body?.email);
     const password = parseAdminPassword(body?.password);
     const role = parseAdminRole(body?.role);
+    const tgUsername = parseAdminTelegramUsername(body?.tgUsername, true);
+    if (!tgUsername) throw new AppError(400, "tgUsername is required");
 
     const existing = await adminRepository.findByEmail(email);
     if (existing) throw new AppError(409, "Admin already exists");
+
+    const usernameOwner =
+      await adminRepository.findByTelegramUsername(tgUsername);
+    if (usernameOwner) {
+      throw new AppError(409, "tgUsername is already in use");
+    }
+
+    const tgChatId =
+      await adminChatService.resolveChatIdForUsername(tgUsername);
 
     const passwordHash = await bcrypt.hash(password, 12);
     const admin = await adminRepository.create({
       name,
       email,
+      tgUsername,
+      tgChatId,
       password: passwordHash,
       role,
     });
@@ -608,6 +699,8 @@ export const adminService = {
     const data: {
       name?: string;
       email?: string;
+      tgUsername?: string;
+      tgChatId?: string | null;
       role?: AdminRole;
       password?: string;
     } = {};
@@ -626,6 +719,20 @@ export const adminService = {
 
     const role = parseAdminRoleOptional(body?.role);
     if (role) data.role = role;
+
+    const tgUsername = parseAdminTelegramUsername(body?.tgUsername, false);
+    if (tgUsername) {
+      if (tgUsername !== existing.tgUsername) {
+        const owner = await adminRepository.findByTelegramUsername(tgUsername);
+        if (owner && owner.id !== existing.id) {
+          throw new AppError(409, "tgUsername is already in use");
+        }
+      }
+
+      data.tgUsername = tgUsername;
+      data.tgChatId =
+        await adminChatService.resolveChatIdForUsername(tgUsername);
+    }
 
     const passwordRaw = body?.password;
     if (typeof passwordRaw === "string" && passwordRaw.trim().length > 0) {

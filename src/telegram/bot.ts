@@ -9,11 +9,30 @@ import { callbackHandler } from "./handlers/callback.handler";
 import { createRateLimitMiddleware } from "./services/rate-limit.service";
 import { supportHandler } from "./handlers/support.handler";
 import { mainMenuKeyboard } from "./keyboards/main.keyboard";
+import { adminChatService } from "./admin-chat.service";
 
 let isStarted = false;
 let botSingleton: Telegraf | null = null;
+let processErrorHandlersRegistered = false;
 
 export const TELEGRAM_WEBHOOK_PATH = "/telegram/webhook";
+
+const registerProcessErrorHandlers = () => {
+  if (processErrorHandlersRegistered) return;
+  processErrorHandlersRegistered = true;
+
+  process.on("unhandledRejection", (reason) => {
+    console.error("[ERROR SOURCE]: telegram.process.unhandledRejection");
+    console.error(
+      reason instanceof Error ? (reason.stack ?? reason.message) : reason,
+    );
+  });
+
+  process.on("uncaughtException", (err) => {
+    console.error("[ERROR SOURCE]: telegram.process.uncaughtException");
+    console.error(err instanceof Error ? (err.stack ?? err.message) : err);
+  });
+};
 
 const isBotDebugEnabled = () => {
   const raw = String(process.env.BOT_DEBUG ?? "")
@@ -113,6 +132,8 @@ export const getTelegramBot = () => {
   bot.start(startHandler);
 
   bot.on("message", async (ctx) => {
+    await adminChatService.syncAdminBindingFromContext(ctx);
+
     const msg = ctx.message as any;
     const incomingText = msg?.text;
 
@@ -129,7 +150,10 @@ export const getTelegramBot = () => {
       });
     }
 
-    if (supportHandler.isAdminChat(ctx) && typeof incomingText === "string") {
+    if (
+      (await supportHandler.isAdminChat(ctx)) &&
+      typeof incomingText === "string"
+    ) {
       const handled = await supportHandler.onAdminReplyText(ctx);
       if (handled) return;
     }
@@ -137,7 +161,10 @@ export const getTelegramBot = () => {
     await messageHandler(ctx);
   });
 
-  bot.on("callback_query", callbackHandler);
+  bot.on("callback_query", async (ctx) => {
+    await adminChatService.syncAdminBindingFromContext(ctx);
+    await callbackHandler(ctx);
+  });
 
   bot.catch((err, ctx) => {
     console.error("[ERROR SOURCE]: telegram.bot.catch");
@@ -169,19 +196,13 @@ export async function startTelegramBot() {
   if (isStarted) return;
   isStarted = true;
 
+  registerProcessErrorHandlers();
+
   const bot = getTelegramBot();
 
   if (isBotDebugEnabled()) {
     console.log("[BOOT]: telegram bot starting...");
     console.log("[BOOT]: backend baseURL:", botApiService.getBaseUrl());
-  }
-
-  const adminChatIdRaw = process.env.TELEGRAM_ADMIN_CHAT_ID;
-  if (isBotDebugEnabled()) {
-    console.log(
-      "[BOOT]: TELEGRAM_ADMIN_CHAT_ID:",
-      adminChatIdRaw ? "set" : "missing",
-    );
   }
 
   try {

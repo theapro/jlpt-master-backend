@@ -6,6 +6,7 @@ import {
   normalizeString,
 } from "../../shared/utils";
 import { telegramSender } from "../../telegram/telegram.sender";
+import { adminChatService } from "../../telegram/admin-chat.service";
 import { courseService } from "../course/course.service";
 import { enrollmentService } from "../enrollment/enrollment.service";
 import { goalService } from "../goal/goal.service";
@@ -153,17 +154,9 @@ const logError = (err: unknown, source: string, context?: unknown) => {
   console.error(err instanceof Error ? (err.stack ?? err.message) : err);
 };
 
-const adminChatId = (() => {
-  const raw = process.env.TELEGRAM_ADMIN_CHAT_ID;
-  if (!raw || raw.trim().length === 0) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-})();
-
 const notifyAdmin = async (text: string) => {
-  if (!adminChatId) return;
   try {
-    await telegramSender.sendMessage(adminChatId, text);
+    await adminChatService.notifyAllAdmins(text);
   } catch (err) {
     logError(err, "bot.service.notifyAdmin");
   }

@@ -121,13 +121,42 @@ export const userRepository = {
     });
   },
 
-  findAllForAdmin: async () => {
+  findByTelegramUsername: async (telegramUsername: string) => {
+    return prisma.user.findFirst({
+      where: {
+        OR: [
+          { telegramUsername },
+          { telegramUsername: telegramUsername.toLowerCase() },
+          { telegramUsername: `@${telegramUsername}` },
+          { telegramUsername: `@${telegramUsername.toLowerCase()}` },
+        ],
+      },
+      select: {
+        id: true,
+        telegramId: true,
+        telegramUsername: true,
+      },
+    });
+  },
+
+  findAllForAdmin: async (params?: {
+    where?: Prisma.UserWhereInput;
+    skip?: number;
+    take?: number;
+  }) => {
     return prisma.user.findMany({
+      where: params?.where,
+      skip: params?.skip,
+      take: params?.take,
       orderBy: { createdAt: "desc" },
       select: {
         ...adminUserSelect,
       },
     });
+  },
+
+  countForAdmin: async (where?: Prisma.UserWhereInput) => {
+    return prisma.user.count({ where });
   },
 
   findByIdForAdmin: async (id: number) => {

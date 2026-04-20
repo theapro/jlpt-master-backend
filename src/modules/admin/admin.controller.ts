@@ -36,8 +36,8 @@ export const adminController = {
     res.status(200).json(result);
   }) as RequestHandler,
 
-  listAdmins: asyncHandler(async (_req, res) => {
-    const result = await adminService.listAdmins();
+  listAdmins: asyncHandler(async (req, res) => {
+    const result = await adminService.listAdmins(req.query as any);
     res.status(200).json(result);
   }) as RequestHandler,
 

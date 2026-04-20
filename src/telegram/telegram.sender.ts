@@ -21,11 +21,16 @@ type SendMessageExtra = Parameters<
 
 export const telegramSender = {
   sendMessage: async (
-    chatId: number,
+    chatId: number | string,
     text: string,
     extra?: SendMessageExtra,
   ) => {
     return getBot().telegram.sendMessage(chatId, text, extra);
+  },
+
+  getChatByUsername: async (username: string) => {
+    const value = username.trim().replace(/^@+/, "");
+    return getBot().telegram.getChat(`@${value}`);
   },
 
   editMessageText: async (chatId: number, messageId: number, text: string) => {
