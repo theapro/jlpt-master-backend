@@ -128,8 +128,7 @@ const GENERIC_ERROR_REPLY = "Xatolik yuz berdi, qaytadan urinib ko‘ring";
 
 const ASK_FORMAT_REPLY = "Sizga qaysi formatdagi kurs qulay?";
 const ASK_GOAL_REPLY = "Siz yapon tilini nima maqsadda o‘rganmoqchisiz?";
-const REGISTER_CTA_REPLY =
-  "Batafsil ma’lumot va ro‘yxatdan o‘tish uchun quyidagi tugmani bosing";
+const REGISTER_CTA_REPLY = "Batafsil ma’lumot olish uchun ro‘yxatdan o‘ting";
 const ASK_NAME_REPLY = "Ismingizni kiriting 👇";
 const ASK_PHONE_REPLY =
   "Telefon raqamingizni kiriting 📱\n" + "yoki pastdagi tugma orqali yuboring";
@@ -378,6 +377,21 @@ const registerReply = async (): Promise<BotResponse> => ({
   reply: REGISTER_CTA_REPLY,
   buttons: await registerKeyboard(),
 });
+
+const sendRegisterCtaMessage = async (user: BotUser) => {
+  const chatId = Number(user.telegramId);
+  if (!Number.isFinite(chatId)) return;
+
+  try {
+    await telegramSender.sendMessage(chatId, REGISTER_CTA_REPLY, {
+      reply_markup: { remove_keyboard: true },
+    });
+  } catch (err) {
+    logError(err, "bot.service.sendRegisterCtaMessage", {
+      telegramId: user.telegramId,
+    });
+  }
+};
 
 const sendIntroMessage = async (user: BotUser) => {
   const chatId = Number(user.telegramId);
@@ -913,23 +927,13 @@ const handleFormat = async (
   if (!format) return invalidChoiceResponse(buttons);
 
   const isBeginner = user.experience === UserExperience.beginner;
-  if (isBeginner) {
-    // ✅ STEP 6 requirement (BEGINNER): after format, show REGISTER CTA.
-    const courseId = await resolveBeginnerCourseId(user);
-    if (!courseId) return genericErrorResponse();
+  const pendingCourseId = isBeginner
+    ? await resolveBeginnerCourseId(user)
+    : resolvePendingCourseId(user);
 
-    await userRepository.updateByTelegramId(user.telegramId, {
-      pendingCourseId: courseId,
-      learningFormat: format,
-      currentStep: BotState.REGISTER,
-    });
-
-    return registerReply();
-  }
-
-  // 🔵 INTERMEDIATE FLOW: must select course first.
-  const pendingCourseId = resolvePendingCourseId(user);
   if (!pendingCourseId) {
+    if (isBeginner) return genericErrorResponse();
+
     await userRepository.updateByTelegramId(user.telegramId, {
       currentStep: BotState.SELECT_COURSE,
     });
@@ -938,11 +942,13 @@ const handleFormat = async (
   }
 
   await userRepository.updateByTelegramId(user.telegramId, {
+    pendingCourseId,
     learningFormat: format,
-    currentStep: BotState.COURSE_CTA,
+    currentStep: BotState.ASK_NAME,
   });
 
-  return courseCtaReply();
+  await sendRegisterCtaMessage(user);
+  return askNameReply();
 };
 
 const handleRegister = async (
@@ -1117,6 +1123,9 @@ const handleAskPhone = async (
   void notifyAdmin(
     "🆕 Yangi ro‘yxatdan o‘tish\n\n" +
       `👤 Ism: ${user.name}\n` +
+      (user.telegramUsername
+        ? `🔗 Username: @${String(user.telegramUsername).replace(/^@+/, "")}\n`
+        : "") +
       `📱 Tel: ${phone}\n` +
       `📘 Kurs: ${courseTitle}\n` +
       `📍 Format: ${formatLearningFormatLabel(user.learningFormat)}`,

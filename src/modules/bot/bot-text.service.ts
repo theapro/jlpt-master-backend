@@ -17,8 +17,7 @@ export const DEFAULT_TEXTS = {
   COURSE_INFO:
     "📘 {courseTitle}\n\n{courseDescriptionBlock}⏳ Davomiyligi: {duration}\n\n{askFormat}",
   ASK_FORMAT: "Sizga qaysi formatdagi kurs qulay?",
-  CTA_REGISTER:
-    "Batafsil ma’lumot va ro‘yxatdan o‘tish uchun quyidagi tugmani bosing",
+  CTA_REGISTER: "Batafsil ma’lumot olish uchun ro‘yxatdan o‘ting",
   ASK_NAME: "Ismingizni kiriting 👇",
   ASK_PHONE:
     "Telefon raqamingizni kiriting 📱\n" +
